@@ -39,6 +39,7 @@ class JobOut(BaseModel):
     needs_platform_choice: bool = False
     target_platforms: list[str] = []
     platforms: list[str] = []  # platforms with an id column in the sheet
+    source_options: list[str] = []  # id columns that actually contain ids (possible inputs)
 
 
 class StartRequest(BaseModel):

@@ -71,6 +71,7 @@ class ColumnMap:
     links: dict[str, int] | None = None
     # header cells the exporter must create: {"<column index>": "<header text>"}
     new_headers: dict[str, str] | None = None
+    filled: list[str] | None = None  # id columns that contain at least one id (possible inputs)
     source: str | None = None  # chosen when the job starts
     targets: list[str] | None = None  # destination platforms (their id columns may be appended)
 
@@ -219,16 +220,25 @@ def analyze_workbook(
         raise WorkbookValidationError("The workbook has the expected headers but no data rows.")
 
     detected: str | None
+    filled = [p for p in platforms if fill[p]]  # only these can be the input
+    if source is not None and source not in filled:
+        raise WorkbookValidationError(
+            f"The {header_of(source)} column is empty; the source must be a column that has IDs "
+            f"({', '.join(header_of(p) for p in filled)})."
+        )
     rates = ", ".join(f"{header_of(p)} {fill[p] / data_rows:.0%}" for p in platforms)
     if source is not None:
         detected, ambiguous = source, False
         reason = f"Source {label(source)}; searching {', '.join(label(t) for t in targets or [])}."
+    elif len(filled) == 1:
+        detected, ambiguous = filled[0], False
+        reason = f"'{header_of(filled[0])}' is the only ID column with IDs in it (fill: {rates})."
     else:
-        first = platforms[0]
-        fuller = [p for p in platforms[1:] if fill[p] > fill[first] + 0.2 * data_rows]
+        first = filled[0]
+        fuller = [p for p in filled[1:] if fill[p] > fill[first] + 0.2 * data_rows]
         if not fuller:
             detected, ambiguous = first, False
-            reason = f"'{header_of(first)}' is the first ID column (fill: {rates})."
+            reason = f"'{header_of(first)}' is the first ID column with IDs (fill: {rates})."
         else:
             detected, ambiguous = None, True
             reason = (
@@ -273,6 +283,7 @@ def analyze_workbook(
         remarks_new_col=remarks_new_col,
         links=links or None,
         new_headers=new_headers or None,
+        filled=filled,
         source=source,
         targets=list(targets) if targets else None,
     )

@@ -166,7 +166,7 @@ export default function Home() {
             )}
             <PlatformPicker
               title="Source: the platform your sheet's IDs come from"
-              options={job.platforms}
+              options={job.source_options}
               selected={choice ? [choice] : []}
               onPick={pickSource}
               keys={keys}

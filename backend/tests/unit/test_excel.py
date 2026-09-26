@@ -48,8 +48,14 @@ def test_detect_twitch_source_with_none_placeholders(tmp_path):
     assert a.detected_platform == "twitch" and not a.ambiguous
 
 
-def test_ambiguous_when_order_and_fill_disagree(tmp_path):
+def test_only_filled_id_columns_can_be_the_source(tmp_path):
     rows = [[None, "France", "abc", None], [None, "Spain", "def", None], [None, "Italy", "ghi", None]]
+    a = analyze_workbook(make_workbook(tmp_path / "amb.xlsx", KICK_HEADERS, rows))
+    assert a.detected_platform == "twitch" and not a.ambiguous and a.columns.filled == ["twitch"]
+
+
+def test_ambiguous_when_order_and_fill_disagree(tmp_path):
+    rows = [["k1", "France", "abc", None], [None, "Spain", "def", None], [None, "Italy", "ghi", None]]
     a = analyze_workbook(make_workbook(tmp_path / "amb.xlsx", KICK_HEADERS, rows))
     assert a.ambiguous and a.detected_platform is None
 

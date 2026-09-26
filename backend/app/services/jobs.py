@@ -116,8 +116,12 @@ def choose_platforms(
     (by default the sheet's other id columns)."""
     columns = ColumnMap.from_dict(job.columns_json or {})
     source = source_platform or job.detected_platform
-    if source not in columns.ids:
-        raise ValueError(f"Please choose the source platform ({', '.join(label(p) for p in columns.ids)}).")
+    inputs = columns.filled if columns.filled is not None else list(columns.ids)
+    if source not in inputs:
+        raise ValueError(
+            "Please choose the source platform: a column with IDs in it "
+            f"({', '.join(label(p) for p in inputs)})."
+        )
     targets = list(dict.fromkeys(target_platforms or [p for p in columns.ids if p != source]))
     bad = [t for t in targets if t == source or t not in PLATFORMS]
     if not targets or bad:

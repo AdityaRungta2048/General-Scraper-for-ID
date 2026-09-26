@@ -112,17 +112,40 @@ def test_full_flow_kick_workbook(client, fake, tmp_path):
     assert client.get(f"/api/jobs/{job['id']}").json()["verification_json"]["ok"]
 
 
-def test_ambiguous_workbook_requires_platform_choice(client, fake, tmp_path):
+def test_empty_id_column_is_never_offered_as_the_source(client, fake, tmp_path):
     fake.add_twitch("abcdef")
+    # id_kick comes first but is empty: Twitch is the only possible input
     path = make_workbook(
         tmp_path / "amb.xlsx",
         KICK_HEADERS,
         [[None, "France", "abcdef", None], [None, "Spain", "ghijkl", None]],
     )
     job = upload(client, path).json()
+    assert job["detected_platform"] == "twitch" and not job["needs_platform_choice"]
+    assert job["source_options"] == ["twitch"] and job["platforms"] == ["kick", "twitch"]
+    r = client.post(f"/api/jobs/{job['id']}/start", json={"source_platform": "kick"})
+    assert r.status_code == 409 and "column with IDs" in r.json()["detail"]
+    done = run_to_completion(client, job["id"])
+    assert done["source_platform"] == "twitch" and done["target_platforms"] == ["kick"]
+    assert done["status"] == "COMPLETED"
+
+
+def test_ambiguous_workbook_requires_platform_choice(client, fake, tmp_path):
+    fake.add_twitch("abcdef")
+    # both columns have ids, but the second is clearly fuller than the first
+    path = make_workbook(
+        tmp_path / "amb2.xlsx",
+        KICK_HEADERS,
+        [
+            ["somekick", "France", "abcdef", None],
+            [None, "Spain", "ghijkl", None],
+            [None, "Italy", "xyz", None],
+        ],
+    )
+    job = upload(client, path).json()
     assert job["needs_platform_choice"] and job["detected_platform"] is None
-    r = client.post(f"/api/jobs/{job['id']}/start", json={})
-    assert r.status_code == 409
+    assert job["source_options"] == ["kick", "twitch"]
+    assert client.post(f"/api/jobs/{job['id']}/start", json={}).status_code == 409
     done = run_to_completion(client, job["id"], "twitch")
     assert done["source_platform"] == "twitch" and done["status"] == "COMPLETED"
 

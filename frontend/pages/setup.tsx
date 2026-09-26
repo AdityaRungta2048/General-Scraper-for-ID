@@ -11,6 +11,7 @@ export default function Setup() {
   const router = useRouter();
   const [platforms, setPlatforms] = useState<PlatformStatus[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showOptional, setShowOptional] = useState(false);
 
   useEffect(() => {
     api
@@ -24,7 +25,6 @@ export default function Setup() {
   const groups: [string, PlatformStatus[]][] = [
     ["Official APIs: your keys", all.filter((p) => !p.keyless && !p.optional)],
     ["No official API: switch on to use public pages", all.filter((p) => p.keyless)],
-    ["Optional helper", all.filter((p) => p.optional)],
   ];
   const update = (s: PlatformStatus) => setPlatforms((ps) => (ps ?? []).map((p) => (p.id === s.id ? s : p)));
 
@@ -69,6 +69,23 @@ export default function Setup() {
           </section>
         ) : null,
       )}
+      {all
+        .filter((p) => p.optional)
+        .map((p) =>
+          showOptional || p.configured ? (
+            <PlatformKeys key={p.id} status={p} onChange={update} />
+          ) : (
+            <div key={p.id} className="px-1">
+              <Button variant="secondary" onClick={() => setShowOptional(true)} data-testid="show-brave">
+                Optional: add a Brave Search API key
+              </Button>
+              <p className="mt-1 text-xs text-zinc-500">
+                Not about the Brave browser (any browser works). Brave Search is an extra search engine the app can
+                use to find hard-to-find accounts; it needs its own API key.
+              </p>
+            </div>
+          ),
+        )}
     </Layout>
   );
 }

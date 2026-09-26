@@ -47,6 +47,8 @@ export interface Job {
   needs_platform_choice: boolean;
   /** destination platforms searched (one job can search several at once) */
   target_platforms: Platform[];
+  /** id columns that actually contain ids: the only possible inputs */
+  source_options: Platform[];
   /** platforms that have an id_<platform> column in the uploaded sheet, left to right */
   platforms: Platform[];
 }

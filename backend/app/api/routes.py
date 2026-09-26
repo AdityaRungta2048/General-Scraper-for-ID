@@ -57,6 +57,8 @@ def _job_out(job: ProcessingJob) -> JobOut:
     out.review_filename = review_filename(job.filename)
     out.needs_platform_choice = job.status == JobStatus.UPLOADED.value and job.detected_platform is None
     out.platforms = list((job.columns_json or {}).get("ids") or {})
+    filled = (job.columns_json or {}).get("filled")
+    out.source_options = list(filled) if filled is not None else out.platforms
     out.target_platforms = job_targets(job)
     return out
 

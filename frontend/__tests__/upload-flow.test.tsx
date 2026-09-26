@@ -40,6 +40,7 @@ describe("upload flow", () => {
             status: "UPLOADED",
             detected_platform: "twitch",
             platforms: ["twitch", "youtube"],
+            source_options: ["twitch"], // id_youtube exists but is empty
             target_platforms: [],
             total_rows: 3,
             sheet_name: "Sheet1",
@@ -62,6 +63,10 @@ describe("upload flow", () => {
     fireEvent.change(input, { target: { files: [new File(["x"], "s.xlsx")] } });
     const summary = await screen.findByTestId("upload-summary");
     const start = within(summary).getByRole("button", { name: "Start Processing" }) as HTMLButtonElement;
+
+    // only the filled id column is offered as the input
+    const sourceRow = within(summary).getByText(/Source: the platform/).parentElement as HTMLElement;
+    expect(within(sourceRow).getAllByRole("button").map((b) => b.textContent)).toEqual(["Twitch"]);
 
     // YouTube (the default destination) has no key yet: its card and guide appear, Start is locked
     const missing = await within(summary).findByTestId("missing-keys");

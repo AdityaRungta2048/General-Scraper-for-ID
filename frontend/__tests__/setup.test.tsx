@@ -65,4 +65,17 @@ describe("API keys setup screen", () => {
     });
     expect(input.value).toBe(""); // the key is not kept in the page after saving
   });
+
+  it("keeps the optional Brave Search key behind a button", async () => {
+    setFetch(
+      vi.fn(() =>
+        Promise.resolve(respond([status("twitch", "Twitch", ["client_id", "client_secret"]), status("brave", "Brave Search", ["api_key"])])),
+      ) as unknown as typeof fetch,
+    );
+    render(<Setup />);
+    const button = await screen.findByTestId("show-brave");
+    expect(screen.queryByTestId("keys-brave")).toBeNull();
+    fireEvent.click(button);
+    expect(screen.getByTestId("keys-brave")).toBeTruthy();
+  });
 });
