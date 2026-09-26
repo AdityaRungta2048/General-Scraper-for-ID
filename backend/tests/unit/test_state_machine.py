@@ -131,6 +131,20 @@ def test_overwrite_policy_only_replaces_with_verified_id():
     assert not out2.write_destination  # never erase user data on a no-match
 
 
+def test_review_suggestion_is_written_highlighted_but_never_over_user_data():
+    r = res("EXISTS", "REVIEW", candidates=["maybe"], review="maybe")
+    r["candidates"][0]["platform"] = "kick"
+    out = transition("twitch", "kick", r)
+    assert out.write_destination and out.destination == "maybe" and out.highlight
+    assert out.status == RowStatus.REVIEW and out.remarks == REMARK_NEAREST_KICK
+    kept = transition("twitch", "kick", r, existing_destination="old", policy="overwrite")
+    assert not kept.write_destination and not kept.highlight
+    r["candidates"][0]["manual_verdict"] = "REJECTED"
+    assert transition("twitch", "kick", r).destination is None
+    gone = res("NOT_FOUND", "REVIEW", target_status="EXISTS_UNVERIFIED", candidates=["maybe"], review="maybe")
+    assert transition("twitch", "kick", gone).destination is None  # missing source: no suggestion
+
+
 def test_placeholder_none_becomes_genuinely_empty():
     out = transition("twitch", "kick", res("EXISTS", "NO_MATCH"), existing_destination="None")
     assert out.write_destination and out.destination is None

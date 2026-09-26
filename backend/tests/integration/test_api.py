@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
+from app.excel.exporter import HIGHLIGHT_COLOR
 from app.main import create_app
 from app.workers.queue import wait_inline
 from tests.excel_helpers import KICK_HEADERS, TWITCH_HEADERS, make_workbook
@@ -75,6 +76,8 @@ def test_full_flow_kick_workbook(client, fake, tmp_path):
     assert d.status_code == 200 and "my_streamers_processed.xlsx" in d.headers["content-disposition"]
     ws = load_workbook(io.BytesIO(d.content))["Streamers"]
     assert ws["A2"].value == "starwraith" and ws["C2"].value == "StarWraith"
+    assert ws["C2"].fill.fgColor.rgb != HIGHLIGHT_COLOR  # exact match: not highlighted
+    first = ws
     rr = client.get(f"/api/jobs/{job['id']}/review-report")
     assert rr.status_code == 200 and "my_streamers_review.xlsx" in rr.headers["content-disposition"]
     assert set(load_workbook(io.BytesIO(rr.content)).sheetnames) == {"Summary", "Rows", "Candidates"}
@@ -84,6 +87,9 @@ def test_full_flow_kick_workbook(client, fake, tmp_path):
     by_src = {i["source_value"]: i for i in items}
     assert {"twinz", "conflicted"} <= set(by_src)
     twinz_row = by_src["twinz"]["original_row"]
+    # review suggestions are written too, highlighted until someone checks them
+    assert first.cell(row=twinz_row, column=3).value == "twinz"
+    assert first.cell(row=twinz_row, column=3).fill.fgColor.rgb == HIGHLIGHT_COLOR
     assert by_src["twinz"]["source_profile"]["username"] == "twinz" and by_src["twinz"]["candidate"]
 
     bad = client.post(
@@ -107,7 +113,20 @@ def test_full_flow_kick_workbook(client, fake, tmp_path):
     job2 = client.get(f"/api/jobs/{job['id']}").json()
     assert job2["match_count"] == job["match_count"] + 1 and job2["export_stale"]
     ws = load_workbook(io.BytesIO(client.get(f"/api/jobs/{job['id']}/download").content))["Streamers"]
-    assert ws.cell(row=twinz_row, column=3).value == "twinz"
+    twinz = ws.cell(row=twinz_row, column=3)
+    assert twinz.value == "twinz" and twinz.fill.fgColor.rgb != HIGHLIGHT_COLOR  # confirmed: plain
+    # "conflicted" was rejected: the next candidate is suggested instead, still highlighted
+    conf = ws.cell(row=conf_row, column=3)
+    assert conf.value == "someoneelse" and conf.fill.fgColor.rgb == HIGHLIGHT_COLOR
+    assert client.get(f"/api/jobs/{job['id']}").json()["verification_json"]["ok"]
+
+    # rejecting the last suggestion leaves the cell empty
+    rej = client.post(
+        f"/api/jobs/{job['id']}/reviews",
+        json={"original_row": conf_row, "verdict": "REJECT", "target_username": "someoneelse"},
+    )
+    assert rej.status_code == 200
+    ws = load_workbook(io.BytesIO(client.get(f"/api/jobs/{job['id']}/download").content))["Streamers"]
     assert ws.cell(row=conf_row, column=3).value is None
     assert client.get(f"/api/jobs/{job['id']}").json()["verification_json"]["ok"]
 

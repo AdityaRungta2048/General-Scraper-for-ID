@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.excel.exporter import CellWrite, ExportError, export_processed, output_filename
+from app.excel.exporter import CellWrite, ExportError, export_processed, highlighted_cells, output_filename
 from app.excel.importer import ColumnMap, WorkbookAnalysis, analyze_workbook, read_rows
 from app.excel.review_report import review_filename, write_review_report
 from app.excel.state_machine import StateMachineError, combine_remarks, remark_write, transition
@@ -302,14 +302,26 @@ def build_export(session: Session, settings: Settings, job: ProcessingJob) -> di
                 links = links or {}
                 links.update({p: u for p, u in found.items() if u is not None or p not in links})
         first = done[0]
+        # review suggestions (not yet confirmed) are written highlighted
+        review = frozenset(
+            str(r.target_platform) for r in done if r.write_destination and r.decision == "REVIEW"
+        )
         if dests or first.write_remarks or links is not None:
-            writes.append(CellWrite(original_row, dests, first.write_remarks, first.output_remarks, links))
+            writes.append(
+                CellWrite(original_row, dests, first.write_remarks, first.output_remarks, links, review)
+            )
     out_dir = settings.outputs_dir / job.id
     out_path = out_dir / output_filename(job.filename)
     try:
         expected = export_processed(original, out_path, columns, writes)
         report = verify_output(
-            original, out_path, columns, platform, expected, [(r.original_row, r.source_value) for r in rows]
+            original,
+            out_path,
+            columns,
+            platform,
+            expected,
+            [(r.original_row, r.source_value) for r in rows],
+            highlighted_cells(writes, columns),
         ).to_dict()
     except (ExportError, OSError, ValueError, KeyError) as exc:
         report = {

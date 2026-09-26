@@ -152,7 +152,14 @@ def build_kick_world(f: FakePlatforms) -> list[Expect]:
             "similar usernames different people",
         ),
         Expect("the-real-abc", "France", "ABCOfficialTV", None, "MATCH", "different usernames same person"),
-        Expect("genericguy", "Italy", None, "nearest possible twitch channel", "*", "generic profile image"),
+        Expect(
+            "genericguy",
+            "Italy",
+            "genericguy",
+            "nearest possible twitch channel",
+            "*",
+            "generic profile image",
+        ),
         Expect("ytcreator", "Spain", "YTCreator_TV", None, "MATCH", "same YouTube"),
         Expect("sitecreator", "France", "site_creator", None, "MATCH", "same website"),
         Expect(
@@ -182,11 +189,13 @@ def build_kick_world(f: FakePlatforms) -> list[Expect]:
             "marco", "Italy", None, "nearest possible twitch channel", "*", "live suffix different person"
         ),
         Expect("davidsantos-", "Spain", "davidsantos_oficial", None, "MATCH", "official suffix"),
-        Expect("twinz", "France", None, "nearest possible twitch channel", "REVIEW", "ambiguous candidates"),
+        Expect(
+            "twinz", "France", "twinz", "nearest possible twitch channel", "REVIEW", "ambiguous candidates"
+        ),
         Expect(
             "conflicted",
             "France",
-            None,
+            "someoneelse",
             "nearest possible twitch channel",
             "REVIEW",
             "conflicting explicit link",

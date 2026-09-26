@@ -117,6 +117,16 @@ class PlatformAdapter(ABC):
         return (await self.find_exact_accounts([handle])).get(handle)
 
 
+def written_id(platform: str, username: str, display_name: str | None) -> str:
+    """The id written to Excel: Twitch display-cased login (e.g. "NikkLive_"), Kick slug,
+    YouTube "@handle"."""
+    if platform == "twitch" and display_name and display_name.lower() == username:
+        return display_name
+    if platform == "youtube" and not username.startswith("channel:"):
+        return "@" + username
+    return username
+
+
 def chunked(items: list[str], size: int) -> list[list[str]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 

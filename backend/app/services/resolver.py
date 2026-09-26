@@ -22,7 +22,7 @@ from app.matching.normalize import normalize_username
 from app.matching.signals import Family, Signal, Strength
 from app.matching.social import canonical_platform_handle, extract_identities
 from app.matching.verifier import IdentityVerifier
-from app.platforms.base import PlatformAdapter, Profile, dedupe
+from app.platforms.base import PlatformAdapter, Profile, dedupe, written_id
 from app.services.stores import ProfileStore
 from app.version import MATCHING_ENGINE_VERSION
 
@@ -31,16 +31,6 @@ log = get_logger("resolver")
 
 def display_id(profile: Profile) -> str:
     return written_id(profile.platform, profile.username, profile.display_name)
-
-
-def written_id(platform: str, username: str, display_name: str | None) -> str:
-    """The id written to Excel: Twitch display-cased login (e.g. "NikkLive_"), Kick slug,
-    YouTube "@handle"."""
-    if platform == "twitch" and display_name and display_name.lower() == username:
-        return display_name
-    if platform == "youtube" and not username.startswith("channel:"):
-        return "@" + username
-    return username
 
 
 class IdentityResolver:

@@ -269,7 +269,9 @@ searched on 2 platforms shows 10 results), all merged back into the same Excel r
 `.xlsx` and `.xlsm` are supported (`.xls` must be re-saved as `.xlsx`).
 
 **Output rules.** The destination ID (`id_twitch` for a Kick sheet, `id_kick` for a Twitch
-sheet, `id_<destination>` in general) is written **only for a confirmed match** (or one you confirm on the Review page).
+sheet, `id_<destination>` in general) is written plain for a confirmed match (or one you confirm on the Review page).
+For a REVIEW row whose source account exists, the suggested candidate's ID is written too, with a
+**yellow highlight** meaning "unconfirmed: check this". It never replaces an ID already in the cell.
 
 The remark follows the two link columns described below. The phrases below use the Kick/Twitch
 names; for other pairs the platform names change (`no youtube id found`,
@@ -381,8 +383,9 @@ Rows marked REVIEW (and "source missing but a same-name account exists") appear 
 **Review** page: source vs candidate profile side by side (avatar, names, bio, category, language,
 social links, URLs), the evidence scores, each signal with its points and explanation.
 
-* **Confirm Match** writes the candidate's ID into the processed workbook (for every row with the
-  same source ID), **Reject Match** stores a negative decision, **Skip** leaves it for later.
+* **Confirm Match** turns the highlighted suggestion into a plain ID in the processed workbook (for
+  every row with the same source ID). **Reject Match** stores a negative decision and removes the
+  ID (or highlights the next candidate, if there is one). **Skip** leaves it highlighted for later.
 * Only accounts the engine actually discovered can be confirmed — you can't type an arbitrary ID.
 * Verdicts are stored in `manual_reviews` and applied as explicit overrides in future jobs too.
   They never change weights or thresholds (no self-modifying learning).

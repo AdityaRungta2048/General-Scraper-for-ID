@@ -27,7 +27,10 @@ export default function ReviewPage() {
   }, [id]);
 
   useEffect(() => {
-    const t = setTimeout(() => load().catch((e: Error) => setError(e.message)), 0);
+    const t = setTimeout(
+      () => load().catch((e: Error) => setError(e.message)),
+      0,
+    );
     return () => clearTimeout(t);
   }, [load]);
 
@@ -64,42 +67,66 @@ export default function ReviewPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           {id && (
-            <Link href={`/jobs/${id}`} className="text-sm text-brand-600 hover:underline">
+            <Link
+              href={`/jobs/${id}`}
+              className="text-sm text-brand-600 hover:underline"
+            >
               ← Back to job
             </Link>
           )}
-          <h1 className="mt-1 text-xl font-semibold">Review uncertain matches</h1>
+          <h1 className="mt-1 text-xl font-semibold">
+            Review uncertain matches
+          </h1>
           <p className="text-sm text-zinc-500">
-            {job?.filename} · {queue.length} remaining{skipped.size ? ` · ${skipped.size} skipped` : ""}
+            {job?.filename} · {queue.length} remaining
+            {skipped.size ? ` · ${skipped.size} skipped` : ""}
           </p>
         </div>
         {id && decided > 0 && (
-          <LinkButton variant="primary" href={api.downloadUrl(id)} download={job?.output_filename ?? undefined}>
+          <LinkButton
+            variant="primary"
+            href={api.downloadUrl(id)}
+            download={job?.output_filename ?? undefined}
+          >
             ⬇ Download updated Excel
           </LinkButton>
         )}
       </div>
 
       <Alert tone="info">
-        Confirming writes the candidate&apos;s ID into the processed workbook for this row (and any duplicate rows of the
-        same source ID). Rejecting stores a negative decision. Decisions are stored as explicit overrides — they never
-        change the scoring weights.
+        In the downloaded workbook, suggested IDs waiting for review are
+        highlighted in yellow. Confirming removes the highlight for this row
+        (and any duplicate rows of the same source ID). Rejecting removes the
+        ID, or highlights the next candidate if there is one. Decisions are
+        stored as explicit overrides — they never change the scoring weights.
       </Alert>
       {error && <Alert tone="danger">{error}</Alert>}
 
       {!current ? (
         <Card className="p-8 text-center text-zinc-600">
-          {items.length === 0 ? "Nothing left to review." : "All remaining items were skipped."}
+          {items.length === 0
+            ? "Nothing left to review."
+            : "All remaining items were skipped."}
         </Card>
       ) : (
         <Card className="space-y-5 p-6" data-testid="review-item">
           <div className="flex flex-wrap items-center gap-2">
             <Badge>Excel row {current.original_row}</Badge>
-            <Badge tone="info">searching {platformLabel(current.target_platform)}</Badge>
+            <Badge tone="info">
+              searching {platformLabel(current.target_platform)}
+            </Badge>
             <Badge tone="warning">REVIEW</Badge>
-            <Badge>confidence {formatConfidence(current.candidate?.confidence ?? current.confidence)}</Badge>
+            <Badge>
+              confidence{" "}
+              {formatConfidence(
+                current.candidate?.confidence ?? current.confidence,
+              )}
+            </Badge>
             {current.source_status === "NOT_FOUND" && (
-              <Badge tone="danger">source {platformLabel(current.source_platform)} account not found</Badge>
+              <Badge tone="danger">
+                source {platformLabel(current.source_platform)} account not
+                found
+              </Badge>
             )}
           </div>
           <div className="flex flex-col gap-4 md:flex-row">
@@ -110,13 +137,21 @@ export default function ReviewPage() {
               socials={current.source_socials}
               missingText="The source account does not exist on this platform."
             />
-            <ProfileCard title="Candidate" profile={current.candidate} missingText="No candidate" />
+            <ProfileCard
+              title="Candidate"
+              profile={current.candidate}
+              missingText="No candidate"
+            />
           </div>
           {current.candidate && (
             <>
               <div className="rounded-lg bg-zinc-50 p-4">
-                <div className="mb-2 text-sm font-semibold">Why this needs review</div>
-                <p className="text-sm text-zinc-700">{current.candidate.reason || current.reason}</p>
+                <div className="mb-2 text-sm font-semibold">
+                  Why this needs review
+                </div>
+                <p className="text-sm text-zinc-700">
+                  {current.candidate.reason || current.reason}
+                </p>
               </div>
               <div className="grid gap-6 md:grid-cols-2">
                 <div>
@@ -133,20 +168,35 @@ export default function ReviewPage() {
                   Other plausible candidates:{" "}
                   {current.other_candidates
                     .filter((c) => c.username !== current.candidate?.username)
-                    .map((c) => `${c.username} (${formatConfidence(c.confidence)})`)
+                    .map(
+                      (c) =>
+                        `${c.username} (${formatConfidence(c.confidence)})`,
+                    )
                     .join(", ")}
                 </p>
               )}
             </>
           )}
           <div className="flex flex-wrap gap-3">
-            <Button variant="primary" disabled={busy || !current.candidate} onClick={() => decide("CONFIRM")}>
+            <Button
+              variant="primary"
+              disabled={busy || !current.candidate}
+              onClick={() => decide("CONFIRM")}
+            >
               Confirm Match
             </Button>
-            <Button variant="danger" disabled={busy || !current.candidate} onClick={() => decide("REJECT")}>
+            <Button
+              variant="danger"
+              disabled={busy || !current.candidate}
+              onClick={() => decide("REJECT")}
+            >
               Reject Match
             </Button>
-            <Button variant="ghost" disabled={busy} onClick={() => decide("SKIP")}>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => decide("SKIP")}
+            >
               Skip
             </Button>
           </div>

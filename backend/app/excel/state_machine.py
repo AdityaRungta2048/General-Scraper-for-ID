@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.models.tables import RowStatus
+from app.platforms.base import written_id
 
 REMARK_NO_BOTH = "no Id on both platforms"
 REMARK_NO_ANY = "no Id on any platform"  # several destinations, none found, source missing too
@@ -94,6 +95,7 @@ class RowOutcome:
     case: str  # e.g. "KICK_A" — for audit/debugging
     link: LinkState = "none"  # this destination's contribution to the row's remark
     source_exists: bool = False
+    highlight: bool = False  # written id is only a review suggestion: highlighted in the sheet
 
 
 # (source_status, decision, target_status) -> (case, write the matched id?)
@@ -115,6 +117,17 @@ def has_target_link(resolution: dict[str, Any]) -> bool:
         c.get("username") and c.get("manual_verdict") != "REJECTED"
         for c in resolution.get("candidates") or []
     )
+
+
+def suggested_id(resolution: dict[str, Any]) -> str | None:
+    """The review candidate's id, written the same way a confirmed id would be."""
+    wanted = resolution.get("review_candidate")
+    if not wanted:
+        return None
+    for c in resolution.get("candidates") or []:
+        if c.get("username") == wanted and c.get("manual_verdict") != "REJECTED":
+            return written_id(str(c.get("platform")), str(c["username"]), c.get("display_name"))
+    return None
 
 
 class StateMachineError(ValueError):
@@ -145,6 +158,12 @@ def transition(
     if write_id and not matched:
         raise StateMachineError(f"state {case} requires a matched id")
     destination = str(matched) if write_id else None
+    # A review suggestion is written too, highlighted, so it can be checked in the sheet itself;
+    # confirming it in review turns it into a plain id, rejecting it removes it. Only when the
+    # source account exists: a missing source keeps its "no ... id" remark and an empty cell.
+    review_id = suggested_id(resolution) if source_exists and decision == "REVIEW" and not write_id else None
+    if review_id:
+        destination = review_id
 
     if source_status == "NOT_FOUND":
         status = RowStatus.MATCH if write_id else RowStatus.SOURCE_NOT_FOUND
@@ -160,13 +179,23 @@ def transition(
                 RowStatus.PRESERVED, None, None, False, False, case + "_PRESERVED", "preserved", source_exists
             )
         # overwrite policy: replace only with a verified id; never erase user data on no-match
-        write_dest = destination is not None
+        write_dest = destination is not None and not review_id
     else:
         # write the matched id, or turn a placeholder such as "None" into a genuinely empty cell
         write_dest = destination is not None or existing_destination is not None
 
     write_rem = remark_write(remark, existing_remarks, [source_platform, target_platform])
-    return RowOutcome(status, destination, remark, write_dest, write_rem, case, link, source_exists)
+    return RowOutcome(
+        status,
+        destination,
+        remark,
+        write_dest,
+        write_rem,
+        case,
+        link,
+        source_exists,
+        bool(review_id) and write_dest,
+    )
 
 
 def error_outcome(status: RowStatus) -> RowOutcome:

@@ -9,6 +9,7 @@ from openpyxl import load_workbook
 from sqlalchemy import select
 
 from app.config import get_settings
+from app.excel.exporter import HIGHLIGHT_COLOR
 from app.models import JobStatus, MatchDecision, ProcessingJob, ProcessingRow
 from app.services.jobs import create_job, start_job
 from app.version import MATCHING_ENGINE_VERSION
@@ -47,6 +48,10 @@ def assert_output(path: Path, expects: list[Expect], dest_col: int, src_col: int
         assert ws.cell(row=i, column=2).value == e.country, f"row {i} country changed"
         assert ws.cell(row=i, column=dest_col).value == e.dest, f"row {i} ({e.case}) destination"
         assert ws.cell(row=i, column=4).value == e.remarks, f"row {i} ({e.case}) remarks"
+        # only unconfirmed review suggestions are highlighted
+        suggested = e.dest is not None and "nearest possible" in (e.remarks or "")
+        highlighted = ws.cell(row=i, column=dest_col).fill.fgColor.rgb == HIGHLIGHT_COLOR
+        assert highlighted == suggested, f"row {i} ({e.case}) highlight"
     assert ws.max_row == len(expects) + 1
 
 
@@ -215,7 +220,7 @@ async def test_channel_link_columns(fake, sf, tmp_path):
             v = ws.cell(row=i, column=col).value
             assert v is None or ("\n" not in v and " " not in v), (i, v)
     # review row: the review candidate; the ID column stays empty
-    assert cell("twinz", tw).value == "https://www.twitch.tv/twinz" and cell("twinz", 3).value is None
+    assert cell("twinz", tw).value == "https://www.twitch.tv/twinz" and cell("twinz", 3).value == "twinz"
     # no match: the closest candidate (same name first) is linked, the ID stays empty
     assert cell("alex123", tw).value == "https://www.twitch.tv/alex123" and cell("alex123", 3).value is None
     # source missing: the same-name account is linked; no source link

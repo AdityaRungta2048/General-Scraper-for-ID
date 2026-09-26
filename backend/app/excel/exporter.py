@@ -15,12 +15,15 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
-from openpyxl.styles import Alignment, Font
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app.excel.importer import ColumnMap
 
 LINK_FONT = Font(color="0563C1", underline="single")
+# unconfirmed review suggestions (written so they can be checked; confirmed ids are plain)
+HIGHLIGHT_COLOR = "FFFFEB9C"
+HIGHLIGHT_FILL = PatternFill(fill_type="solid", start_color=HIGHLIGHT_COLOR, end_color=HIGHLIGHT_COLOR)
 
 
 class ExportError(RuntimeError):
@@ -35,6 +38,8 @@ class CellWrite:
     remarks: str | None
     # {"<platform>": "<link url>", ...}; None = leave the link cells untouched
     links: dict[str, str | None] | None = None
+    # destination platforms whose written id is an unconfirmed review suggestion (highlighted)
+    highlights: frozenset[str] = frozenset()
 
 
 def first_url(text: str | None) -> str | None:
@@ -83,6 +88,15 @@ def expected_cell_values(writes: list[CellWrite], columns: ColumnMap) -> dict[tu
     return expected
 
 
+def highlighted_cells(writes: list[CellWrite], columns: ColumnMap) -> set[tuple[int, int]]:
+    return {
+        (w.original_row, columns.dest_col(t))
+        for w in writes
+        for t in w.highlights
+        if w.destinations.get(t) is not None
+    }
+
+
 def export_processed(
     original_path: Path,
     output_path: Path,
@@ -91,6 +105,7 @@ def export_processed(
 ) -> dict[tuple[int, int], str | None]:
     expected = expected_cell_values(writes, columns)
     keep_vba = original_path.suffix.lower() == ".xlsm"
+    highlight = highlighted_cells(writes, columns)
     wb = load_workbook(original_path, keep_vba=keep_vba, keep_links=True, rich_text=True)
     if columns.sheet_name not in wb.sheetnames:
         raise ExportError(f"worksheet '{columns.sheet_name}' missing from the original workbook")
@@ -102,6 +117,8 @@ def export_processed(
         if isinstance(value, str) and value.startswith("="):
             raise ExportError(f"refusing to write formula-like value into {cell.coordinate}")
         cell.value = value
+        if (row, col) in highlight:
+            cell.fill = HIGHLIGHT_FILL
         if col in link_cells(columns) and row > columns.header_row:
             url = first_url(value)
             cell.hyperlink = url  # None removes a stale link

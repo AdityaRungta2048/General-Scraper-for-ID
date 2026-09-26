@@ -17,7 +17,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 
-from app.excel.exporter import first_url, link_cells
+from app.excel.exporter import HIGHLIGHT_COLOR, first_url, link_cells
 from app.excel.importer import ColumnMap, cell_text
 
 
@@ -80,7 +80,9 @@ def verify_output(
     source_platform: str,
     expected: dict[tuple[int, int], str | None],
     row_sources: list[tuple[int, str | None]],
+    highlighted: set[tuple[int, int]] | None = None,
 ) -> VerificationReport:
+    highlighted = highlighted or set()
     rep = VerificationReport()
     # 1/15. file integrity + reopen
     try:
@@ -172,7 +174,18 @@ def verify_output(
                     rep.mismatches.append(
                         f"{name}!{n_cell.coordinate}: hyperlink {_link(n_cell)!r}, {what_link}"
                     )
-                if not (is_target and (r, c) in expected and not o_cell.has_style) and _style_sig(
+                if is_target and (r, c) in highlighted:
+                    # review suggestion: must carry the highlight fill; nothing else may change
+                    if str(n_cell.fill.fgColor.rgb) != HIGHLIGHT_COLOR or (
+                        o_cell.has_style
+                        and _style_sig(o_cell)[:2] + _style_sig(o_cell)[3:]
+                        != _style_sig(n_cell)[:2] + _style_sig(n_cell)[3:]
+                    ):
+                        diffs += 1
+                        rep.mismatches.append(
+                            f"{name}!{n_cell.coordinate}: review highlight missing or wrong"
+                        )
+                elif not (is_target and (r, c) in expected and not o_cell.has_style) and _style_sig(
                     o_cell
                 ) != _style_sig(n_cell):
                     diffs += 1
