@@ -12,6 +12,7 @@ import tempfile
 from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
@@ -19,11 +20,30 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app.excel.importer import ColumnMap
+from app.excel.state_machine import is_blank
 
 LINK_FONT = Font(color="0563C1", underline="single")
-# unconfirmed review suggestions (written so they can be checked; confirmed ids are plain)
+# yellow fill earlier versions put on unconfirmed ("nearest") suggestions in the ID columns
 HIGHLIGHT_COLOR = "FFFFEB9C"
-HIGHLIGHT_FILL = PatternFill(fill_type="solid", start_color=HIGHLIGHT_COLOR, end_color=HIGHLIGHT_COLOR)
+
+
+def stale_highlights(ws: Any, columns: ColumnMap) -> set[tuple[int, int]]:
+    """ID cells that already hold an ID but still carry the yellow suggestion highlight.
+    Those rows are left untouched except that the highlight is removed."""
+    out: set[tuple[int, int]] = set()
+    for target in columns.targets or []:
+        col = columns.dest_col(target)
+        for r in range(columns.header_row + 1, ws.max_row + 1):
+            cell = ws.cell(row=r, column=col)
+            fill = cell.fill
+            if (
+                fill is not None
+                and fill.fill_type == "solid"
+                and str(fill.fgColor.rgb).upper() == HIGHLIGHT_COLOR
+                and not is_blank(cell.value)
+            ):
+                out.add((r, col))
+    return out
 
 
 class ExportError(RuntimeError):
@@ -38,8 +58,6 @@ class CellWrite:
     remarks: str | None
     # {"<platform>": "<link url>", ...}; None = leave the link cells untouched
     links: dict[str, str | None] | None = None
-    # destination platforms whose written id is an unconfirmed review suggestion (highlighted)
-    highlights: frozenset[str] = frozenset()
 
 
 def first_url(text: str | None) -> str | None:
@@ -88,15 +106,6 @@ def expected_cell_values(writes: list[CellWrite], columns: ColumnMap) -> dict[tu
     return expected
 
 
-def highlighted_cells(writes: list[CellWrite], columns: ColumnMap) -> set[tuple[int, int]]:
-    return {
-        (w.original_row, columns.dest_col(t))
-        for w in writes
-        for t in w.highlights
-        if w.destinations.get(t) is not None
-    }
-
-
 def export_processed(
     original_path: Path,
     output_path: Path,
@@ -105,11 +114,12 @@ def export_processed(
 ) -> dict[tuple[int, int], str | None]:
     expected = expected_cell_values(writes, columns)
     keep_vba = original_path.suffix.lower() == ".xlsm"
-    highlight = highlighted_cells(writes, columns)
     wb = load_workbook(original_path, keep_vba=keep_vba, keep_links=True, rich_text=True)
     if columns.sheet_name not in wb.sheetnames:
         raise ExportError(f"worksheet '{columns.sheet_name}' missing from the original workbook")
     ws = wb[columns.sheet_name]
+    for row, col in stale_highlights(ws, columns):
+        ws.cell(row=row, column=col).fill = PatternFill(fill_type=None)
     for (row, col), value in expected.items():
         cell = ws.cell(row=row, column=col)
         if isinstance(cell, MergedCell):
@@ -117,8 +127,6 @@ def export_processed(
         if isinstance(value, str) and value.startswith("="):
             raise ExportError(f"refusing to write formula-like value into {cell.coordinate}")
         cell.value = value
-        if (row, col) in highlight:
-            cell.fill = HIGHLIGHT_FILL
         if col in link_cells(columns) and row > columns.header_row:
             url = first_url(value)
             cell.hyperlink = url  # None removes a stale link

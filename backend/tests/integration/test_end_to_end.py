@@ -48,10 +48,8 @@ def assert_output(path: Path, expects: list[Expect], dest_col: int, src_col: int
         assert ws.cell(row=i, column=2).value == e.country, f"row {i} country changed"
         assert ws.cell(row=i, column=dest_col).value == e.dest, f"row {i} ({e.case}) destination"
         assert ws.cell(row=i, column=4).value == e.remarks, f"row {i} ({e.case}) remarks"
-        # only unconfirmed review suggestions are highlighted
-        suggested = e.dest is not None and "nearest possible" in (e.remarks or "")
-        highlighted = ws.cell(row=i, column=dest_col).fill.fgColor.rgb == HIGHLIGHT_COLOR
-        assert highlighted == suggested, f"row {i} ({e.case}) highlight"
+        # nothing is written as an unconfirmed (highlighted) suggestion
+        assert ws.cell(row=i, column=dest_col).fill.fgColor.rgb != HIGHLIGHT_COLOR, f"row {i} highlight"
     assert ws.max_row == len(expects) + 1
 
 
@@ -219,12 +217,12 @@ async def test_channel_link_columns(fake, sf, tmp_path):
         for col in (5, 6):
             v = ws.cell(row=i, column=col).value
             assert v is None or ("\n" not in v and " " not in v), (i, v)
-    # review row: the review candidate; the ID column stays empty
-    assert cell("twinz", tw).value == "https://www.twitch.tv/twinz" and cell("twinz", 3).value == "twinz"
-    # no match: the closest candidate (same name first) is linked, the ID stays empty
-    assert cell("alex123", tw).value == "https://www.twitch.tv/alex123" and cell("alex123", 3).value is None
-    # source missing: the same-name account is linked; no source link
+    # no match: no other-platform link at all (never a "nearest" channel), the ID stays empty
+    assert cell("fekah", tw).value is None and cell("fekah", 3).value is None
+    assert cell("fekah", kk).value == "https://kick.com/fekah"
+    # source missing: the same-name account is linked and written; no source link
     assert cell("ghostkick", tw).value == "https://www.twitch.tv/ghostkick"
+    assert cell("ghostkick", 3).value == "ghostkick"
     assert cell("ghostkick", kk).value is None
     # nothing found / API error rows get no links
     assert cell("unknownabc", tw).value is None and cell("flaky", tw).value is None
@@ -242,3 +240,29 @@ async def test_existing_link_columns_are_reused(fake, sf, tmp_path):
     assert ws.max_column == 6  # no extra columns appended
     assert ws["E2"].value == "https://www.twitch.tv/starwraith"  # stale value replaced
     assert ws["F2"].value == "https://kick.com/starwraith"
+
+
+async def test_filled_in_row_untouched_except_highlight_and_old_remark(fake, sf, tmp_path):
+    from openpyxl.styles import PatternFill
+
+    build_twitch_world(fake)
+    headers = ["id_twitch", "country", "id_kick", "remarks", "twitch_id_link", "kick_id_link"]
+    path = make_workbook(
+        tmp_path / "filled.xlsx",
+        headers,
+        [
+            ["kosstochka", "Italy", "kosstochka", "nearest possible kick channel", "tw-link", "kick-link"],
+            ["starwraith", "Spain", None, "nearest possible kick channel", None, None],
+        ],
+    )
+    wb = load_workbook(path)
+    wb["Streamers"]["C2"].fill = PatternFill("solid", fgColor=HIGHLIGHT_COLOR)
+    wb.save(path)
+    job = await run(sf, path, "twitch")
+    assert job.verification_json["ok"], job.verification_json
+    ws = load_workbook(job.output_path)["Streamers"]
+    # filled-in row: ID and links untouched, yellow highlight and old "nearest" remark removed
+    assert [ws.cell(row=2, column=c).value for c in (3, 5, 6)] == ["kosstochka", "tw-link", "kick-link"]
+    assert ws["C2"].fill.fill_type is None and ws["D2"].value is None
+    # normal row: matched by the rules, remark cleared
+    assert ws["C3"].value == "starwraith" and ws["D3"].value is None

@@ -13,17 +13,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.excel.exporter import CellWrite, ExportError, export_processed, highlighted_cells, output_filename
+from app.excel.exporter import CellWrite, ExportError, export_processed, output_filename
 from app.excel.importer import ColumnMap, WorkbookAnalysis, analyze_workbook, read_rows
 from app.excel.review_report import review_filename, write_review_report
-from app.excel.state_machine import StateMachineError, combine_remarks, remark_write, transition
+from app.excel.state_machine import (
+    OLD_NEAREST_REMARKS,
+    StateMachineError,
+    combine_remarks,
+    remark_write,
+    transition,
+)
 from app.excel.verifier import verify_output
 from app.logging_setup import get_logger
-from app.matching.normalize import normalize_username
 from app.models import JobStatus, ManualReview, ProcessingJob, ProcessingRow, RowStatus
 from app.models.tables import ERROR_STATUSES, new_id
 from app.platforms.catalog import PLATFORMS, label
-from app.services.resolver import apply_manual_reviews
+from app.services.resolver import apply_manual_reviews, apply_match_rules
 from app.version import MATCHING_ENGINE_VERSION
 
 log = get_logger("jobs")
@@ -194,7 +199,7 @@ def apply_resolution_to_row(
     policy: str,
 ) -> None:
     """Resolution (+ manual verdicts) -> state machine -> row output fields."""
-    final = apply_manual_reviews(resolution, verdicts)
+    final = apply_match_rules(apply_manual_reviews(resolution, verdicts))
     outcome = transition(
         source_platform, target_platform, final, row.existing_destination, row.existing_remarks, policy
     )
@@ -248,6 +253,12 @@ def finalize_remarks(rows: list[ProcessingRow], source: str) -> None:
         }
         unfinished = any(not RowStatus(r.status).is_final for r in sibs)
         links = {t: s for t, s in states.items() if s and s != "preserved"}
+        if not unfinished and states and all(s == "preserved" for s in states.values()):
+            # every ID already filled in: untouched, except an old "nearest possible" remark
+            clear = str(sibs[0].existing_remarks or "").strip() in OLD_NEAREST_REMARKS
+            for r in sibs:
+                r.output_remarks, r.write_remarks = None, clear
+            continue
         if unfinished or not links or any(s is None for s in states.values()):
             for r in sibs:
                 r.write_remarks = False
@@ -302,14 +313,8 @@ def build_export(session: Session, settings: Settings, job: ProcessingJob) -> di
                 links = links or {}
                 links.update({p: u for p, u in found.items() if u is not None or p not in links})
         first = done[0]
-        # review suggestions (not yet confirmed) are written highlighted
-        review = frozenset(
-            str(r.target_platform) for r in done if r.write_destination and r.decision == "REVIEW"
-        )
         if dests or first.write_remarks or links is not None:
-            writes.append(
-                CellWrite(original_row, dests, first.write_remarks, first.output_remarks, links, review)
-            )
+            writes.append(CellWrite(original_row, dests, first.write_remarks, first.output_remarks, links))
     out_dir = settings.outputs_dir / job.id
     out_path = out_dir / output_filename(job.filename)
     try:
@@ -321,7 +326,6 @@ def build_export(session: Session, settings: Settings, job: ProcessingJob) -> di
             platform,
             expected,
             [(r.original_row, r.source_value) for r in rows],
-            highlighted_cells(writes, columns),
         ).to_dict()
     except (ExportError, OSError, ValueError, KeyError) as exc:
         report = {
@@ -419,13 +423,11 @@ def channel_links(
     """One channel URL per platform for the <platform>_id_link cells.
 
     * source platform: the row's own channel (if the account exists)
-    * other platform: the single best account — the confirmed match; otherwise the review
-      candidate; otherwise the closest candidate found (exact same name first, then
-      confidence). Accounts rejected in review are never shown. The ID column is still
-      only filled for verified matches, so an empty ID next to a link means "unconfirmed".
+    * other platform: the matched account only (exact same name, profile picture or bio);
+      no link when there is no match. Rows whose ID was already filled in are left untouched.
     """
     ev = row.evidence_json
-    if not ev or row.status == RowStatus.SKIPPED_EMPTY.value:
+    if not ev or row.status in (RowStatus.SKIPPED_EMPTY.value, RowStatus.PRESERVED.value):
         return None
     links: dict[str, str | None] = {source_platform: None, target: None}
 
@@ -440,20 +442,7 @@ def channel_links(
         for c in (ev.get("candidates") or [])
         if c.get("username") and verdicts.get(c["username"]) != "REJECTED"
     ]
-    best: str | None = None
-    if row.decision == "MATCH" and row.matched_id:
-        best = row.matched_id.lower().lstrip("@")
-    elif row.review_candidate and row.review_candidate not in {
-        u for u, v in verdicts.items() if v == "REJECTED"
-    }:
-        best = row.review_candidate
-    elif candidates:
-        source_name = normalize_username(row.source_value)
-
-        def rank(c: dict[str, Any]) -> tuple[bool, float]:
-            return (normalize_username(c["username"]) == source_name, c.get("confidence") or 0.0)
-
-        best = max(candidates, key=rank)["username"]
+    best = row.matched_id.lower().lstrip("@") if row.decision == "MATCH" and row.matched_id else None
     if best:
         profile = next((c for c in candidates if c["username"] == best), None)
         links[target] = (profile or {}).get("profile_url") or PLATFORMS[target].adapter.url_format.format(

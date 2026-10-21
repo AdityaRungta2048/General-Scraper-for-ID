@@ -268,31 +268,35 @@ used column. Internally every Excel row becomes one result per destination (a 5-
 searched on 2 platforms shows 10 results), all merged back into the same Excel row.
 `.xlsx` and `.xlsm` are supported (`.xls` must be re-saved as `.xlsx`).
 
-**Output rules.** The destination ID (`id_twitch` for a Kick sheet, `id_kick` for a Twitch
-sheet, `id_<destination>` in general) is written plain for a confirmed match (or one you confirm on the Review page).
-For a REVIEW row whose source account exists, the suggested candidate's ID is written too, with a
-**yellow highlight** meaning "unconfirmed: check this". It never replaces an ID already in the cell.
+**Matching rules (every platform pair).** When the source account exists, an account on a
+searched platform is the same creator **only** if it has
 
-The remark follows the two link columns described below. The phrases below use the Kick/Twitch
-names; for other pairs the platform names change (`no youtube id found`,
-`nearest possible youtube channel`). When several platforms are searched, the phrases for each
-destination are joined with `; ` in the destination order you chose (a confirmed match adds
-nothing), e.g. `nearest possible kick channel; no youtube id found`. If the source account
-doesn't exist, the remark is `no <source> id` plus `no <p> id found` for each destination with
-nothing, or `no Id on any platform` when none of them has anything. If one destination hits an
-API error, that row's remark is left untouched until **Retry failed rows** completes it:
+* the **exact same channel name** (`foo_bar`, `foo-bar` and `foo.bar` count as the same), or
+* the **same profile picture**, judged on the character/subject in it, not the background
+  colour, or
+* **exactly the same bio**.
 
-| Kick link | Twitch link | remarks |
+Otherwise that platform gets no account at all (there is no "nearest possible" channel any
+more). When the source account does **not** exist, a same-name account on a searched platform
+is taken as the creator's channel.
+
+**Output rules.** The destination ID (`id_<destination>`) is written for a match under the rules
+above (or one you confirm on the Review page). It never replaces an ID already in the cell.
+
+The remark follows the link columns. When several platforms are searched, the phrases for each
+destination are joined with `; ` in the destination order you chose (a match adds nothing),
+e.g. `no kick id; no youtube id found`. If one destination hits an API error, that row's remark
+is left untouched until **Retry failed rows** completes it. With one destination:
+
+| Source channel | Searched platform's channel | remarks |
 |---|---|---|
-| ✓ | ✓ confirmed match | *(empty)* |
-| ✓ | ✓ closest Twitch account only (Kick sheet) | `nearest possible twitch channel` |
-| ✓ closest Kick account only (Twitch sheet) | ✓ | `nearest possible kick channel` |
-| ✓ | — | `no twitch id found` |
-| — | ✓ | `no kick id` |
-| — | — | `no Id on both platforms` |
+| ✓ | ✓ matched | *(empty)* |
+| ✓ | — | `no <platform> id found` (`no kick id` for Kick) |
+| — | ✓ same name | `no <source> channel found` (e.g. `no twitch channel found`) |
+| — | — | `no Id on both platforms` (`no Id on any platform` with several destinations) |
 
-When the source ID itself doesn't exist, the `no … id` remark is used even if the other
-platform's link is only the closest account.
+Rows whose destination ID is already filled in are left as they are; only an old
+`nearest possible … channel` remark and the old yellow suggestion highlight are removed.
 
 API/network errors leave the row **untouched** (reported as an error, retryable), and an
 empty source cell is left untouched.
@@ -303,12 +307,8 @@ empty source cell is left untouched.
 clickable link each**:
 
 * the source platform's column: the row's own channel (empty if that account doesn't exist);
-* the other platform's column: the single best account — the confirmed match; otherwise the
-  review candidate; otherwise the closest account found (same name first, then confidence).
+* each searched platform's column: the matched account only (empty when there is no match).
   Accounts you rejected in review are never linked.
-
-The ID column is still filled only for verified matches, so **a link next to an empty ID is
-an unconfirmed suggestion** — check it before relying on it.
 
 Guarantees: rows are never sorted, inserted, deleted or de-duplicated; results are written by
 the original Excel row number; source IDs, countries, other sheets, formatting, widths, filters,
@@ -379,13 +379,14 @@ uncorroborated evidence → REVIEW. Otherwise NO_MATCH.
 
 ## 15. Review process
 
-Rows marked REVIEW (and "source missing but a same-name account exists") appear on the job's
+With the matching rules above every row is decided automatically, so the Review queue is
+normally empty. Rows marked REVIEW (from earlier versions) appear on the job's
 **Review** page: source vs candidate profile side by side (avatar, names, bio, category, language,
 social links, URLs), the evidence scores, each signal with its points and explanation.
 
-* **Confirm Match** turns the highlighted suggestion into a plain ID in the processed workbook (for
-  every row with the same source ID). **Reject Match** stores a negative decision and removes the
-  ID (or highlights the next candidate, if there is one). **Skip** leaves it highlighted for later.
+* **Confirm Match** writes the candidate's ID in the processed workbook (for every row with the
+  same source ID). **Reject Match** stores a negative decision and removes the ID. A verdict can
+  be sent for any discovered candidate (API), also to override a rule match.
 * Only accounts the engine actually discovered can be confirmed — you can't type an arbitrary ID.
 * Verdicts are stored in `manual_reviews` and applied as explicit overrides in future jobs too.
   They never change weights or thresholds (no self-modifying learning).

@@ -5,15 +5,13 @@ from app.excel.state_machine import (
     StateMachineError,
     error_outcome,
     remark_missing,
-    remark_nearest,
+    remark_source_missing,
     transition,
 )
 from app.models.tables import RowStatus
 
 REMARK_NO_KICK = remark_missing("kick")
 REMARK_NO_TWITCH = remark_missing("twitch")
-REMARK_NEAREST_KICK = remark_nearest("kick")
-REMARK_NEAREST_TWITCH = remark_nearest("twitch")
 
 
 def res(source_status, decision, target_status=None, matched="Target_1", candidates=(), review=None):
@@ -32,20 +30,26 @@ def res(source_status, decision, target_status=None, matched="Target_1", candida
     ("resolution", "dest", "remark", "status", "case"),
     [
         (res("EXISTS", "MATCH"), "Target_1", None, RowStatus.MATCH, "KICK_A"),
-        (res("EXISTS", "REVIEW", review="cand"), None, REMARK_NEAREST_TWITCH, RowStatus.REVIEW, "KICK_B"),
+        (res("EXISTS", "REVIEW", review="cand"), None, REMARK_NO_TWITCH, RowStatus.REVIEW, "KICK_B"),
         (
             res("EXISTS", "NO_MATCH", candidates=["closest"]),
             None,
-            REMARK_NEAREST_TWITCH,
+            REMARK_NO_TWITCH,
             RowStatus.NO_MATCH,
             "KICK_B",
         ),
         (res("EXISTS", "NO_MATCH"), None, REMARK_NO_TWITCH, RowStatus.NO_MATCH, "KICK_B"),
-        (res("NOT_FOUND", "MATCH", "VERIFIED"), "Target_1", REMARK_NO_KICK, RowStatus.MATCH, "KICK_C"),
+        (
+            res("NOT_FOUND", "MATCH", "VERIFIED"),
+            "Target_1",
+            remark_source_missing("kick"),
+            RowStatus.MATCH,
+            "KICK_C",
+        ),
         (
             res("NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED", review="same"),
             None,
-            REMARK_NO_KICK,
+            REMARK_NO_BOTH,
             RowStatus.SOURCE_NOT_FOUND,
             "KICK_C2",
         ),
@@ -68,12 +72,12 @@ def test_kick_source_table(resolution, dest, remark, status, case):
     ("resolution", "dest", "remark", "case"),
     [
         (res("EXISTS", "MATCH"), "Target_1", None, "TWITCH_A"),
-        (res("EXISTS", "REVIEW", review="cand"), None, REMARK_NEAREST_KICK, "TWITCH_B"),
-        (res("EXISTS", "NO_MATCH", candidates=["closest"]), None, REMARK_NEAREST_KICK, "TWITCH_B"),
+        (res("EXISTS", "REVIEW", review="cand"), None, REMARK_NO_KICK, "TWITCH_B"),
+        (res("EXISTS", "NO_MATCH", candidates=["closest"]), None, REMARK_NO_KICK, "TWITCH_B"),
         (res("EXISTS", "NO_MATCH"), None, REMARK_NO_KICK, "TWITCH_B"),
         (res("NOT_FOUND", "NO_MATCH", "NOT_FOUND"), None, REMARK_NO_BOTH, "TWITCH_D"),
-        (res("NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED", review="same"), None, REMARK_NO_TWITCH, "TWITCH_C2"),
-        (res("NOT_FOUND", "MATCH", "VERIFIED"), "Target_1", REMARK_NO_TWITCH, "TWITCH_C"),
+        (res("NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED", review="same"), None, REMARK_NO_BOTH, "TWITCH_C2"),
+        (res("NOT_FOUND", "MATCH", "VERIFIED"), "Target_1", "no twitch channel found", "TWITCH_C"),
     ],
 )
 def test_twitch_source_table(resolution, dest, remark, case):
@@ -81,21 +85,15 @@ def test_twitch_source_table(resolution, dest, remark, case):
     assert (out.destination, out.remarks, out.case) == (dest, remark, case)
 
 
-def test_remark_never_says_no_kick_id_when_a_kick_link_is_given():
-    # twitch source, twitch account exists, a (non-rejected) Kick account is linked
+def test_unmatched_candidate_is_never_offered_as_nearest_channel():
     out = transition("twitch", "kick", res("EXISTS", "NO_MATCH", candidates=["somekick"]))
-    assert out.remarks == REMARK_NEAREST_KICK  # a Kick link is given, but only the nearest channel
-    # ...but a candidate rejected in review is not linked, so no Kick id remains
-    rejected = res("EXISTS", "NO_MATCH")
-    rejected["candidates"] = [{"username": "somekick", "manual_verdict": "REJECTED"}]
-    assert transition("twitch", "kick", rejected).remarks == REMARK_NO_KICK
+    assert out.remarks == REMARK_NO_KICK and out.destination is None
 
 
 def test_exact_remark_phrases():
     assert REMARK_NO_KICK == "no kick id"
     assert REMARK_NO_TWITCH == "no twitch id found"
-    assert REMARK_NEAREST_TWITCH == "nearest possible twitch channel"
-    assert REMARK_NEAREST_KICK == "nearest possible kick channel"
+    assert remark_source_missing("twitch") == "no twitch channel found"
     assert REMARK_NO_BOTH == "no Id on both platforms"
 
 
@@ -131,18 +129,10 @@ def test_overwrite_policy_only_replaces_with_verified_id():
     assert not out2.write_destination  # never erase user data on a no-match
 
 
-def test_review_suggestion_is_written_highlighted_but_never_over_user_data():
+def test_unconfirmed_candidate_is_never_written():
     r = res("EXISTS", "REVIEW", candidates=["maybe"], review="maybe")
-    r["candidates"][0]["platform"] = "kick"
     out = transition("twitch", "kick", r)
-    assert out.write_destination and out.destination == "maybe" and out.highlight
-    assert out.status == RowStatus.REVIEW and out.remarks == REMARK_NEAREST_KICK
-    kept = transition("twitch", "kick", r, existing_destination="old", policy="overwrite")
-    assert not kept.write_destination and not kept.highlight
-    r["candidates"][0]["manual_verdict"] = "REJECTED"
-    assert transition("twitch", "kick", r).destination is None
-    gone = res("NOT_FOUND", "REVIEW", target_status="EXISTS_UNVERIFIED", candidates=["maybe"], review="maybe")
-    assert transition("twitch", "kick", gone).destination is None  # missing source: no suggestion
+    assert out.destination is None and out.remarks == REMARK_NO_KICK
 
 
 def test_placeholder_none_becomes_genuinely_empty():
@@ -179,9 +169,9 @@ def test_app_remark_from_previous_run_is_replaced_or_cleared():
     ("resolution", "remark"),
     [
         (res("EXISTS", "MATCH"), None),
-        (res("EXISTS", "REVIEW", review="cand"), "nearest possible youtube channel"),
+        (res("EXISTS", "REVIEW", review="cand"), "no youtube id found"),
         (res("EXISTS", "NO_MATCH"), "no youtube id found"),
-        (res("NOT_FOUND", "REVIEW", "EXISTS_UNVERIFIED", review="same"), "no twitch id found"),
+        (res("NOT_FOUND", "MATCH", "VERIFIED"), "no twitch channel found"),
         (res("NOT_FOUND", "NO_MATCH", "NOT_FOUND"), REMARK_NO_BOTH),
     ],
 )
@@ -194,3 +184,10 @@ def test_platform_names_follow_the_chosen_pair(resolution, remark):
 def test_own_remarks_of_other_platforms_are_recognised():
     out = transition("youtube", "kick", res("EXISTS", "MATCH"), existing_remarks="no kick id")
     assert out.write_remarks and out.remarks is None
+
+
+def test_preserved_row_keeps_its_remark():
+    out = transition(
+        "twitch", "kick", res("EXISTS", "NO_MATCH"), existing_destination="x", existing_remarks="mine"
+    )
+    assert out.status == RowStatus.PRESERVED and not out.write_remarks and out.link == "preserved"

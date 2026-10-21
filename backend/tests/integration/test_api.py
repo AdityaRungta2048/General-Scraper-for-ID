@@ -82,52 +82,36 @@ def test_full_flow_kick_workbook(client, fake, tmp_path):
     assert rr.status_code == 200 and "my_streamers_review.xlsx" in rr.headers["content-disposition"]
     assert set(load_workbook(io.BytesIO(rr.content)).sheetnames) == {"Summary", "Rows", "Candidates"}
 
-    # --- review workflow: confirm the ambiguous "twinz" row, reject "conflicted"
-    items = client.get(f"/api/jobs/{job['id']}/reviews").json()
-    by_src = {i["source_value"]: i for i in items}
-    assert {"twinz", "conflicted"} <= set(by_src)
-    twinz_row = by_src["twinz"]["original_row"]
-    # review suggestions are written too, highlighted until someone checks them
-    assert first.cell(row=twinz_row, column=3).value == "twinz"
-    assert first.cell(row=twinz_row, column=3).fill.fgColor.rgb == HIGHLIGHT_COLOR
-    assert by_src["twinz"]["source_profile"]["username"] == "twinz" and by_src["twinz"]["candidate"]
-
+    # --- the matching rules leave nothing "nearest"/unconfirmed, so the review queue is empty
+    assert client.get(f"/api/jobs/{job['id']}/reviews").json() == []
+    # --- manual verdicts still override: confirm a discovered candidate, reject a rule match
+    by_src = {r["source_value"]: r for r in rows["items"]}
+    fekah_row = by_src["fekah"]["original_row"]
+    assert first.cell(row=fekah_row, column=3).value is None
     bad = client.post(
         f"/api/jobs/{job['id']}/reviews",
-        json={"original_row": twinz_row, "verdict": "CONFIRM", "target_username": "invented_name"},
+        json={"original_row": fekah_row, "verdict": "CONFIRM", "target_username": "invented_name"},
     )
     assert bad.status_code == 400  # never accept an id the engine did not discover
 
     ok = client.post(
         f"/api/jobs/{job['id']}/reviews",
-        json={"original_row": twinz_row, "verdict": "CONFIRM", "target_username": "twinz"},
+        json={"original_row": fekah_row, "verdict": "CONFIRM", "target_username": "fekah_"},
     )
     assert ok.status_code == 200, ok.text
-    conf_row = by_src["conflicted"]["original_row"]
+    alex_row = by_src["alex123"]["original_row"]
     rej = client.post(
         f"/api/jobs/{job['id']}/reviews",
-        json={"original_row": conf_row, "verdict": "REJECT", "target_username": "conflicted"},
+        json={"original_row": alex_row, "verdict": "REJECT", "target_username": "alex123"},
     )
     assert rej.status_code == 200
 
     job2 = client.get(f"/api/jobs/{job['id']}").json()
-    assert job2["match_count"] == job["match_count"] + 1 and job2["export_stale"]
+    assert job2["match_count"] == job["match_count"] and job2["export_stale"]
     ws = load_workbook(io.BytesIO(client.get(f"/api/jobs/{job['id']}/download").content))["Streamers"]
-    twinz = ws.cell(row=twinz_row, column=3)
-    assert twinz.value == "twinz" and twinz.fill.fgColor.rgb != HIGHLIGHT_COLOR  # confirmed: plain
-    # "conflicted" was rejected: the next candidate is suggested instead, still highlighted
-    conf = ws.cell(row=conf_row, column=3)
-    assert conf.value == "someoneelse" and conf.fill.fgColor.rgb == HIGHLIGHT_COLOR
+    assert ws.cell(row=fekah_row, column=3).value == "Fekah_"
+    assert ws.cell(row=alex_row, column=3).value is None
     assert client.get(f"/api/jobs/{job['id']}").json()["verification_json"]["ok"]
-
-    # rejecting the last suggestion leaves the cell empty
-    rej = client.post(
-        f"/api/jobs/{job['id']}/reviews",
-        json={"original_row": conf_row, "verdict": "REJECT", "target_username": "someoneelse"},
-    )
-    assert rej.status_code == 200
-    ws = load_workbook(io.BytesIO(client.get(f"/api/jobs/{job['id']}/download").content))["Streamers"]
-    assert ws.cell(row=conf_row, column=3).value is None
     assert client.get(f"/api/jobs/{job['id']}").json()["verification_json"]["ok"]
 
 

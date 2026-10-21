@@ -82,12 +82,19 @@ source row, and search runs only when those found nothing plausible.
   (chosen by the user, or the only other ID column). Link columns are created for the pair only.
 * Resolutions are cached per `(engine version, source>target, id, country)`; manual reviews are
   scoped by (source, target).
+* Matching rules (`apply_match_rules`, applied last to every resolution, every pair): source
+  exists -> a candidate is the same creator only with the exact same channel name (separators
+  `_ - .` equal), the same profile picture (STRONG image signal: border-trimmed, centre-cropped
+  and outline hashes, so a background colour change does not matter; generic images excluded)
+  or exactly the same bio; source missing -> a same-name target account is the match. No
+  REVIEW / "nearest" output; a human CONFIRM still overrides.
 * Remark phrases derive from platform names: `no <p> id found` (historical `no kick id` for Kick),
-  `nearest possible <target> channel`, `no Id on both platforms`.
+  `no <source> channel found`, `no Id on both platforms`. Old `nearest possible <p> channel`
+  remarks are recognised and removed, also on preserved rows.
 * **Several destinations per job:** `ColumnMap.targets` is a list; `processing_rows` has one
   record per (Excel row, `target_platform`) (migration 0002). Each record is resolved and run
   through the state machine independently; `finalize_remarks` then combines the per-destination
-  link states ("match" / "nearest" / "none") into one remark per Excel row, and the exporter
+  link states ("match" / "none") into one remark per Excel row, and the exporter
   merges the ID, remark and link cells of the siblings into that row. With one destination the
   output is identical to the two-platform rules.
 * Credentials come from the API keys screen (`DATA_DIR/credentials.json`), falling back to env.
@@ -190,34 +197,30 @@ PROCESSING_ERROR` (retryable, never written as a remark), `SKIPPED_EMPTY`,
 `PRESERVED`.
 
 Destination ID: written only when the (final, after manual review) decision is MATCH —
-case A (source exists) or C (source missing, target verified by a back-link or a human).
+case A (source exists) or C (source missing, same-name target account).
 
-Remarks mirror the channel-link columns (a later product decision replacing the original
-per-case remark table), for both source platforms:
+Remarks mirror the channel-link columns:
 
-| Kick link present | Twitch link present | remarks |
+| Source link present | Target link present | remarks |
 |---|---|---|
-| yes | yes, confirmed match | *(empty)* |
-| yes | yes, closest Twitch account only (Kick source) | `nearest possible twitch channel` |
-| yes, closest Kick account only (Twitch source) | yes | `nearest possible kick channel` |
-| yes | no | `no twitch id found` |
-| no | yes | `no kick id` |
+| yes | yes (match) | *(empty)* |
+| yes | no | `no <target> id found` (`no kick id`) |
+| no | yes (same-name match) | `no <source> channel found` |
 | no | no | `no Id on both platforms` |
 
-A platform "has a link" when, for the source platform, the source account exists; for the
-other platform, there is a match, a review candidate or any candidate not rejected in
-review. Errors never touch the workbook.
+A platform "has a link" when, for the source platform, the source account exists; for a
+target platform, there is a match. Errors never touch the workbook.
 
 Other rules:
 * Empty source cell → row untouched (`SKIPPED_EMPTY`).
 * Destination cell already filled in the upload → **preserved** by default
-  (`EXISTING_DESTINATION_POLICY=preserve`); the row is still verified and any
-  disagreement is reported in the review report. `overwrite` is available.
+  (`EXISTING_DESTINATION_POLICY=preserve`): links untouched; only an old
+  `nearest possible … channel` remark and the yellow suggestion fill are removed. The row is
+  still verified and any disagreement is reported in the review report. `overwrite` is available.
 * A pre-existing remark that is not one of the two app phrases is never erased.
 * Two informational columns, `twitch_id_link` and `kick_id_link`, are appended after the
-  last used column (or reused if present), one URL each: the source channel, and the best
-  other-platform account (confirmed match > review candidate > closest candidate). They
-  never influence the ID or remarks columns.
+  last used column (or reused if present), one URL each: the source channel, and the
+  matched account (empty without a match).
 * Nothing else in the workbook is modified; output is `<stem>_processed.xlsx`.
 
 ## H. How row order is guaranteed

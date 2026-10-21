@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.models.tables import RowStatus
-from app.platforms.base import written_id
+from app.platforms.catalog import PLATFORMS
 
 REMARK_NO_BOTH = "no Id on both platforms"
 REMARK_NO_ANY = "no Id on any platform"  # several destinations, none found, source missing too
@@ -22,17 +22,28 @@ def remark_missing(platform: str) -> str:
     return "no kick id" if platform == "kick" else f"no {platform} id found"
 
 
+def remark_source_missing(platform: str) -> str:
+    """The source account does not exist, but a same-name account was found elsewhere."""
+    return f"no {platform} channel found"
+
+
 def remark_nearest(platform: str) -> str:
+    """Written by earlier versions; now only recognised (and removed)."""
     return f"nearest possible {platform} channel"
 
 
+# "nearest possible <platform> channel" from earlier versions, for any platform
+OLD_NEAREST_REMARKS = {"nearest possible channel"} | {remark_nearest(p) for p in PLATFORMS}
+
+
 def app_remarks(platforms: list[str]) -> set[str]:
-    """Every single remark phrase this app can write for these platforms."""
+    """Every single remark phrase this app can write (or wrote before) for these platforms."""
     return {
         REMARK_NO_BOTH,
         REMARK_NO_ANY,
-        "nearest possible channel",  # wording used briefly by an earlier version
+        *OLD_NEAREST_REMARKS,
         *(remark_missing(p) for p in platforms),
+        *(remark_source_missing(p) for p in platforms),
         *(remark_nearest(p) for p in platforms),
     }
 
@@ -45,29 +56,25 @@ def is_app_remark(text: Any, platforms: list[str]) -> bool:
     return all(part.strip() in known for part in str(text).split(";"))
 
 
-# Per destination: "match" (confirmed id), "nearest" (only an unconfirmed closest account),
-# "none" (nothing on that platform).
+# Per destination: "match" (matched id) or "none" (no account on that platform).
 LinkState = str
 
 
 def combine_remarks(source_platform: str, source_exists: bool, links: dict[str, LinkState]) -> str | None:
     """One remark for an Excel row, from the link state of every destination platform.
 
-    With a single destination this is exactly the original two-platform table: empty for a
-    confirmed match, "nearest possible <t> channel", "no <t> id found", "no <s> id" (source
-    missing) and "no Id on both platforms".
+    With a single destination: empty for a match, "no <t> id found" (no match),
+    "no <s> channel found" (source missing, same-name account found) and
+    "no Id on both platforms".
     """
+    missing = [t for t, state in links.items() if state != "match"]
     if not source_exists:
-        missing = [t for t, state in links.items() if state == "none"]
         if len(missing) == len(links):
             return REMARK_NO_BOTH if len(links) == 1 else REMARK_NO_ANY
-        return REMARK_SEPARATOR.join([remark_missing(source_platform), *(remark_missing(t) for t in missing)])
-    parts = [
-        remark_nearest(t) if state == "nearest" else remark_missing(t)
-        for t, state in links.items()
-        if state != "match"
-    ]
-    return REMARK_SEPARATOR.join(parts) or None
+        return REMARK_SEPARATOR.join(
+            [remark_source_missing(source_platform), *(remark_missing(t) for t in missing)]
+        )
+    return REMARK_SEPARATOR.join(remark_missing(t) for t in missing) or None
 
 
 def remark_write(remark: str | None, existing_remarks: Any, platforms: list[str]) -> bool:
@@ -95,7 +102,6 @@ class RowOutcome:
     case: str  # e.g. "KICK_A" — for audit/debugging
     link: LinkState = "none"  # this destination's contribution to the row's remark
     source_exists: bool = False
-    highlight: bool = False  # written id is only a review suggestion: highlighted in the sheet
 
 
 # (source_status, decision, target_status) -> (case, write the matched id?)
@@ -108,26 +114,6 @@ _TABLE: dict[tuple[str, str, str | None], tuple[str, bool]] = {
     ("NOT_FOUND", "NO_MATCH", "EXISTS_UNVERIFIED"): ("C2", False),
     ("NOT_FOUND", "NO_MATCH", "NOT_FOUND"): ("D", False),
 }
-
-
-def has_target_link(resolution: dict[str, Any]) -> bool:
-    """Is there a best destination account to link — the match, the review candidate, or any
-    candidate not rejected in review? (same rule as the link columns)"""
-    return bool(resolution.get("matched_id") or resolution.get("review_candidate")) or any(
-        c.get("username") and c.get("manual_verdict") != "REJECTED"
-        for c in resolution.get("candidates") or []
-    )
-
-
-def suggested_id(resolution: dict[str, Any]) -> str | None:
-    """The review candidate's id, written the same way a confirmed id would be."""
-    wanted = resolution.get("review_candidate")
-    if not wanted:
-        return None
-    for c in resolution.get("candidates") or []:
-        if c.get("username") == wanted and c.get("manual_verdict") != "REJECTED":
-            return written_id(str(c.get("platform")), str(c["username"]), c.get("display_name"))
-    return None
 
 
 class StateMachineError(ValueError):
@@ -151,19 +137,13 @@ def transition(
     letter, write_id = _TABLE[key]
     case = f"{source_platform.upper()}_{letter}"
     source_exists = source_status == "EXISTS"
-    link = "match" if write_id else ("nearest" if has_target_link(resolution) else "none")
+    link = "match" if write_id else "none"
     remark = combine_remarks(source_platform, source_exists, {target_platform: link})
 
     matched = resolution.get("matched_id")
     if write_id and not matched:
         raise StateMachineError(f"state {case} requires a matched id")
     destination = str(matched) if write_id else None
-    # A review suggestion is written too, highlighted, so it can be checked in the sheet itself;
-    # confirming it in review turns it into a plain id, rejecting it removes it. Only when the
-    # source account exists: a missing source keeps its "no ... id" remark and an empty cell.
-    review_id = suggested_id(resolution) if source_exists and decision == "REVIEW" and not write_id else None
-    if review_id:
-        destination = review_id
 
     if source_status == "NOT_FOUND":
         status = RowStatus.MATCH if write_id else RowStatus.SOURCE_NOT_FOUND
@@ -179,7 +159,7 @@ def transition(
                 RowStatus.PRESERVED, None, None, False, False, case + "_PRESERVED", "preserved", source_exists
             )
         # overwrite policy: replace only with a verified id; never erase user data on no-match
-        write_dest = destination is not None and not review_id
+        write_dest = destination is not None
     else:
         # write the matched id, or turn a placeholder such as "None" into a genuinely empty cell
         write_dest = destination is not None or existing_destination is not None
@@ -194,7 +174,6 @@ def transition(
         case,
         link,
         source_exists,
-        bool(review_id) and write_dest,
     )
 
 

@@ -94,11 +94,11 @@ export default function ReviewPage() {
       </div>
 
       <Alert tone="info">
-        In the downloaded workbook, suggested IDs waiting for review are
-        highlighted in yellow. Confirming removes the highlight for this row
-        (and any duplicate rows of the same source ID). Rejecting removes the
-        ID, or highlights the next candidate if there is one. Decisions are
-        stored as explicit overrides — they never change the scoring weights.
+        IDs are matched only on the exact same channel name, the same profile
+        picture or the exact same bio, so this queue is normally empty.
+        Confirming writes the ID for this row (and any duplicate rows of the
+        same source ID); rejecting removes it. Decisions are stored as explicit
+        overrides — they never change the scoring weights.
       </Alert>
       {error && <Alert tone="danger">{error}</Alert>}
 

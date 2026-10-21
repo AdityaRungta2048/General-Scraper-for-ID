@@ -56,13 +56,13 @@ async def test_twitch_to_youtube_workbook(fake, sf, tmp_path):
         ("@starwraith", None),
         ("@completelydifferent", None),
         (None, "no youtube id found"),
-        (None, "no twitch id found"),
+        ("@ghostie", "no twitch channel found"),
         (None, "no Id on both platforms"),
     ]
     assert [ws.cell(row=1, column=c).value for c in (5, 6)] == ["twitch_id_link", "youtube_id_link"]
     assert ws["F2"].value == "https://www.youtube.com/@starwraith"
     assert ws["F2"].hyperlink.target == "https://www.youtube.com/@starwraith"
-    assert ws["F5"].value == "https://www.youtube.com/@ghostie"  # unverified same-name suggestion
+    assert ws["F5"].value == "https://www.youtube.com/@ghostie"  # twitch missing: same-name channel
     assert ws["E2"].value == "https://www.twitch.tv/starwraith"
 
 
@@ -214,7 +214,7 @@ def test_one_source_searched_on_several_platforms_at_once(client, fake, tmp_path
         ("starwraith", "@starwraith", None),
         (None, "@completelydifferent", "no kick id"),
         (None, None, "no kick id; no youtube id found"),
-        (None, None, "no twitch id found; no kick id"),
+        (None, "@ghostie", "no twitch channel found; no kick id"),
         (None, None, "no Id on any platform"),
     ]
     assert (
@@ -238,27 +238,24 @@ def test_review_on_one_destination_updates_the_combined_remark(client, fake, tmp
         job = client.post("/api/jobs", files={"file": ("rv.xlsx", fh)}).json()
     client.post(f"/api/jobs/{job['id']}/start", json={"target_platforms": ["kick", "youtube"]})
     _finish(client, job["id"])
-    items = client.get(f"/api/jobs/{job['id']}/reviews").json()
-    assert [i["target_platform"] for i in items] == ["youtube"]
+    # twitch account missing: the same-name YouTube channel is written, nothing left to review
+    assert client.get(f"/api/jobs/{job['id']}/reviews").json() == []
     ambiguous = client.post(f"/api/jobs/{job['id']}/reviews", json={"original_row": 2, "verdict": "CONFIRM"})
     assert ambiguous.status_code == 400  # two destinations for this row: say which
-    ok = client.post(
+    rej = client.post(
         f"/api/jobs/{job['id']}/reviews",
         json={
             "original_row": 2,
-            "verdict": "CONFIRM",
+            "verdict": "REJECT",
             "target_platform": "youtube",
             "target_username": "ghostie",
         },
     )
-    assert ok.status_code == 200, ok.text
+    assert rej.status_code == 200, rej.text
     assert client.get(f"/api/jobs/{job['id']}/download").status_code == 200
     ws = load_workbook(get_settings().outputs_dir / job["id"] / "rv_processed.xlsx")["Streamers"]
-    assert (ws["D2"].value, ws["E2"].value, ws["C2"].value) == (
-        None,
-        "@ghostie",
-        "no twitch id found; no kick id",
-    )
+    # the rejected channel is removed from the combined remark and the ID column
+    assert (ws["D2"].value, ws["E2"].value, ws["C2"].value) == (None, None, "no Id on any platform")
 
 
 def test_one_failed_destination_leaves_the_remark_untouched(client, fake, tmp_path):
