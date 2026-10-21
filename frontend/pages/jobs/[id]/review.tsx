@@ -94,10 +94,11 @@ export default function ReviewPage() {
       </div>
 
       <Alert tone="info">
-        IDs are matched only on the exact same channel name, the same profile
-        picture or the exact same bio, so this queue is normally empty.
-        Confirming writes the ID for this row (and any duplicate rows of the
-        same source ID); rejecting removes it. Decisions are stored as explicit
+        These accounts matched on name, picture or bio but something else
+        (category, language, country, picture or a link) disagrees, or they
+        are close but not exact. Nothing is written to the sheet until you
+        decide. Confirming writes the ID for this row (and any duplicate rows
+        of the same source ID); rejecting removes it. Decisions are stored as explicit
         overrides — they never change the scoring weights.
       </Alert>
       {error && <Alert tone="danger">{error}</Alert>}
