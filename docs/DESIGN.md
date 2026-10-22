@@ -80,8 +80,8 @@ source row, and search runs only when those found nothing plausible.
 * `platforms/catalog.py` lists the platforms (id, label, adapter, credential fields).
 * `ColumnMap.ids` maps every `id_<platform>` column; the destination is `ColumnMap.target`
   (chosen by the user, or the only other ID column). Link columns are created for the pair only.
-* Resolutions are cached per `(engine version, source>target, id, country)`; manual reviews are
-  scoped by (source, target).
+* Every run starts fresh: resolutions, profiles and image hashes live in memory for one run only
+  (never saved, never reused by a later job); manual reviews are scoped by (job, source, target).
 * Matching rules (`apply_match_rules`, applied last to every resolution, every pair): source
   exists -> a candidate is the same creator only with the exact same channel name (separators
   `_ - .` equal), the same profile picture (STRONG image signal: border-trimmed, centre-cropped
@@ -133,7 +133,7 @@ Next.js UI ──► FastAPI ──► jobs/rows tables ──► queue (RQ+Redi
 
 ## D. Candidate generation strategy
 
-Per unique source id (duplicates resolved once per job and cached across jobs):
+Per unique source id (duplicates resolved once per job; nothing is reused across jobs):
 
 1. **Exact** lookup of the source account (existence check).
 2. **Explicit links**: target-platform URLs/handles found in the source profile

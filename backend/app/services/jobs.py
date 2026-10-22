@@ -177,11 +177,13 @@ def recompute_counters(session: Session, job: ProcessingJob) -> None:
 
 
 def manual_verdicts(
-    session: Session, source_platform: str, target_platform: str
+    session: Session, job_id: str, source_platform: str, target_platform: str
 ) -> dict[str, dict[str, str]]:
+    """Review decisions made in THIS job only: every run starts fresh, nothing carries over."""
     out: dict[str, dict[str, str]] = {}
     for mr in session.execute(
         select(ManualReview).where(
+            ManualReview.job_id == job_id,
             ManualReview.source_platform == source_platform,
             ManualReview.target_platform == target_platform,
         )
@@ -287,7 +289,7 @@ def build_export(session: Session, settings: Settings, job: ProcessingJob) -> di
             .order_by(ProcessingRow.original_row, ProcessingRow.target_platform)
         ).scalars()
     )
-    verdicts = {t: manual_verdicts(session, platform, t) for t in targets}
+    verdicts = {t: manual_verdicts(session, job.id, platform, t) for t in targets}
     # Re-derive every resolved row with the current output rules (e.g. remark wording) from its
     # stored evidence — no platform calls — so re-downloads of older jobs follow the same rules.
     for r in rows:

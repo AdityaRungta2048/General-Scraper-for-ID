@@ -94,7 +94,7 @@ async def process_job(
                 .order_by(ProcessingRow.original_row)
             ).all()
         )
-        verdicts = {t: manual_verdicts(s, platform, t) for t in targets}
+        verdicts = {t: manual_verdicts(s, job_id, platform, t) for t in targets}
         s.commit()
 
     # Group rows by the identity that will be resolved: (destination, source id, country).
