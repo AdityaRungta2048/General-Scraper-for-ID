@@ -32,7 +32,7 @@ class OrchestratedResolver:
         self.started: list[str] = []
 
     async def resolve(
-        self, platform: str, target: str, value: str, country: str | None, rejected=None
+        self, platform: str, target: str, value: str, country: str | None, rejected=None, renamed_to=None
     ) -> dict[str, Any]:
         self.started.append(value)
         idx = self.order.index(value)
@@ -170,7 +170,7 @@ def test_cancelled_job_stops(env, sf, tmp_path):
         job_id = job.id
 
     class CancellingResolver(OrchestratedResolver):
-        async def resolve(self, platform, target, value, country, rejected=None):
+        async def resolve(self, platform, target, value, country, rejected=None, renamed_to=None):
             with sf() as s2:
                 j = s2.get(ProcessingJob, job_id)
                 j.status = JobStatus.CANCELLED.value

@@ -4,7 +4,9 @@
     (or, if the source does not exist, a strictly deterministic same-name check on
     the target platform, verified only by an explicit back-link)
 
-With a Streams Charts key, renamed channels are followed too: a source ID that no longer
+A current name the user typed in the sheet's "renamed_to" column (looked up by hand on
+streamscharts.com) replaces the source ID when that account exists. With a Streams Charts key,
+renamed channels are also followed automatically: a source ID that no longer
 exists is looked up under its earlier name, and when nothing on the other platform has the
 source's name, so is the other platform's channel that used to have it.
 
@@ -15,6 +17,7 @@ resolutions never bake in human decisions.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -59,10 +62,17 @@ class IdentityResolver:
         self.resolution_ttl = resolution_ttl
         self.renames = renames
 
-    def cache_key(self, source_platform: str, target_platform: str, key: str, country: str | None) -> str:
+    def cache_key(
+        self,
+        source_platform: str,
+        target_platform: str,
+        key: str,
+        country: str | None,
+        renamed_to: str | None = None,
+    ) -> str:
         return (
             f"{MATCHING_ENGINE_VERSION}|{source_platform}>{target_platform}|{key}|"
-            f"{(country or '').strip().lower()}"
+            f"{(country or '').strip().lower()}|{(renamed_to or '').strip().lower()}"
         )
 
     async def resolve(
@@ -72,13 +82,14 @@ class IdentityResolver:
         raw_value: str,
         country: str | None,
         rejected: set[str] | None = None,
+        renamed_to: str | None = None,
     ) -> dict[str, Any]:
         src_adapter = self.adapters[source_platform]
         tgt_platform = target_platform
         tgt_adapter = self.adapters[tgt_platform]
         key = src_adapter.normalize_handle(raw_value)
         cache_key = self.cache_key(
-            source_platform, tgt_platform, key or f"invalid:{raw_value.strip().lower()}", country
+            source_platform, tgt_platform, key or f"invalid:{raw_value.strip().lower()}", country, renamed_to
         )
         if not rejected:
             cached = self.cache.get("resolution", cache_key)
@@ -96,7 +107,16 @@ class IdentityResolver:
         }
 
         source: Profile | None = None
-        if key is not None:
+        new_key = src_adapter.normalize_handle(renamed_to) if renamed_to else None
+        if new_key is not None and new_key != key:
+            found = await src_adapter.find_exact_accounts(src_adapter.existence_variants(new_key))
+            current = next((p for p in found.values() if p is not None), None)
+            if current is not None:
+                source = replace(current, former_names=[key] if key else [], rename_confirmed=True)
+                base["renamed_source"] = {"from": key or raw_value, "to": current.username, "by": "sheet"}
+            else:
+                base["renamed_to_not_found"] = renamed_to
+        if source is None and key is not None:
             found = await src_adapter.find_exact_accounts(src_adapter.existence_variants(key))
             source = next((p for p in found.values() if p is not None), None)
             if source is None and self.renames is not None:
@@ -563,4 +583,8 @@ def apply_match_rules(resolution: dict[str, Any]) -> dict[str, Any]:
     if res.get("renamed_source"):
         r = res["renamed_source"]
         res["reason"] = f"{res['reason']} (The {src_pf} channel {r['from']} is now called {r['to']}.)"
+    if res.get("renamed_to_not_found"):
+        res["reason"] = (
+            f"{res['reason']} (renamed_to {res['renamed_to_not_found']!r}: no such {src_pf} channel.)"
+        )
     return res

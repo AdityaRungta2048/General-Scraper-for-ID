@@ -36,6 +36,12 @@ _ALIASES: dict[str, str] = {
     "id_yt": "id_youtube",
     "yt_id": "id_youtube",
     "yt_id_link": "youtube_id_link",
+    "renamed_to": "renamed_to",
+    "renamed": "renamed_to",
+    "new_name": "renamed_to",
+    "current_name": "renamed_to",
+    "streams_charts_link": "streams_charts_link",
+    "streamscharts_link": "streams_charts_link",
 }
 for _p in PLATFORMS:
     _ALIASES.update(dict.fromkeys((f"id_{_p}", f"{_p}_id", f"id{_p}", _p), f"id_{_p}"))
@@ -44,6 +50,12 @@ for _p in PLATFORMS:
     )
 ID_HEADERS = {f"id_{p}": p for p in PLATFORMS}
 LINK_HEADERS = {p: f"{p}_id_link" for p in PLATFORMS}
+# Rename checklist: a Streams Charts link for rows with no result, and a column where the user
+# types the channel's current name (looked up by hand, for free, on streamscharts.com).
+CHECK_LINK_HEADER = "streams_charts_link"
+CHECK_LINK_KEY = "streamscharts"  # its key in ColumnMap.links
+RENAMED_HEADER = "renamed_to"
+RENAME_CHECK_PLATFORMS = ("twitch", "kick")
 
 
 class WorkbookValidationError(ValueError):
@@ -74,6 +86,7 @@ class ColumnMap:
     filled: list[str] | None = None  # id columns that contain at least one id (possible inputs)
     source: str | None = None  # chosen when the job starts
     targets: list[str] | None = None  # destination platforms (their id columns may be appended)
+    renamed: int | None = None  # the user's "renamed_to" column (input only)
 
     def source_col(self, platform: str) -> int:
         return self.ids[platform]
@@ -125,6 +138,7 @@ class ImportedRow:
     country: str | None
     existing_destinations: dict[str, str | None]  # destination platform -> current cell text
     existing_remarks: str | None
+    renamed_to: str | None = None
 
 
 def cell_text(value: Any) -> str | None:
@@ -165,7 +179,7 @@ def analyze_workbook(
     wb = _open(path, data_only=True)
     if not wb.worksheets:
         raise WorkbookValidationError("The workbook contains no worksheets.")
-    known = {"country", "remarks", *ID_HEADERS, *LINK_HEADERS.values()}
+    known = {"country", "remarks", *ID_HEADERS, *LINK_HEADERS.values(), CHECK_LINK_HEADER, RENAMED_HEADER}
     matches: list[tuple[Any, int, dict[str, int], list[str]]] = []
     for ws in wb.worksheets:
         if getattr(ws, "sheet_state", "visible") != "visible" and len(wb.worksheets) > 1:
@@ -247,6 +261,7 @@ def analyze_workbook(
             )
 
     remarks_new_col = None
+    renamed: int | None = cols.get(RENAMED_HEADER)
     links: dict[str, int] = {}
     new_headers: dict[str, str] = {}
     if source is not None:
@@ -274,6 +289,17 @@ def analyze_workbook(
                 links[p] = next_col
                 new_headers[str(next_col)] = header
                 next_col += 1
+        if source in RENAME_CHECK_PLATFORMS:
+            for header in (CHECK_LINK_HEADER, RENAMED_HEADER):
+                if header in cols:
+                    col = cols[header]
+                else:
+                    col, next_col = next_col, next_col + 1
+                    new_headers[str(col)] = header
+                if header == CHECK_LINK_HEADER:
+                    links[CHECK_LINK_KEY] = col
+                else:
+                    renamed = col
     colmap = ColumnMap(
         sheet_name=ws.title,
         header_row=header_row,
@@ -286,6 +312,7 @@ def analyze_workbook(
         filled=filled,
         source=source,
         targets=list(targets) if targets else None,
+        renamed=renamed if source in RENAME_CHECK_PLATFORMS else None,
     )
 
     src_col = ids[detected or platforms[0]]
@@ -342,6 +369,9 @@ def read_rows(path: Path, columns: ColumnMap) -> list[ImportedRow]:
                 existing_destinations={t: cell_text(ws.cell(row=r, column=c).value) for t, c in dest.items()},
                 existing_remarks=cell_text(ws.cell(row=r, column=columns.remarks).value)
                 if columns.remarks
+                else None,
+                renamed_to=cell_text(ws.cell(row=r, column=columns.renamed).value)
+                if columns.renamed
                 else None,
             )
         )

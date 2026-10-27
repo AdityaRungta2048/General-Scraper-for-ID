@@ -218,8 +218,15 @@ def test_export_adds_remarks_header_when_missing(tmp_path):
 def test_link_columns_placed_after_all_existing_columns(tmp_path):
     p = make_workbook(tmp_path / "wide.xlsx", [*KICK_HEADERS, "notes"], [["abc", "France", None, None, "x"]])
     a = analyze_workbook(p, "kick", ["twitch"])
-    assert a.columns.links == {"kick": 6, "twitch": 7}
-    assert a.columns.new_headers == {"6": "kick_id_link", "7": "twitch_id_link"}
+    assert a.columns.links == {"kick": 6, "twitch": 7, "streamscharts": 8}
+    assert a.columns.new_headers == {
+        "6": "kick_id_link",
+        "7": "twitch_id_link",
+        # rename checklist (only written when a row needs checking)
+        "8": "streams_charts_link",
+        "9": "renamed_to",
+    }
+    assert a.columns.renamed == 9
 
 
 def test_verifier_detects_wrong_hyperlink(tmp_path):

@@ -183,10 +183,34 @@ responses, but were not tested against the live sites; if a site changes, only t
 (`backend/app/platforms/public_sites.py`) needs updating. None of the six has a usable search (except
 CHZZK), so accounts are found by exact name, name variants (a small per-row budget) and links in bios.
 
-## 5d. Renamed channels (Streams Charts, optional)
+## 5d. Renamed channels
 
 The platform APIs only know an account's **current** name, so an ID in your sheet that was renamed
-looks like "no such account". With a [Streams Charts API](https://streamscharts.com/api) key
+looks like "no such account". There are two ways to handle that.
+
+### Free: the rename checklist (Twitch and Kick sheets)
+
+When some rows get no result, the processed workbook gets two more columns:
+
+| Column | What it holds |
+|---|---|
+| `streams_charts_link` | For rows with no result: the source channel's page on streamscharts.com. |
+| `renamed_to` | Empty. You type the channel's **current** name here. |
+
+1. Click a row's link (or paste the old ID into the streamscharts.com search bar and click the
+   result). Streams Charts shows the channel under its current name and its other channels.
+2. The ID in your sheet was renamed → type the current name in `renamed_to`. The other platform's
+   channel is listed there instead → you can type it straight into its `id_<platform>` cell.
+3. Upload the workbook again. Rows with `renamed_to` use that account (checked through the official
+   API; the matching rules apply as usual), the link column points to the current channel, and
+   your ID cell is kept. A name that doesn't exist is noted in the row's reason.
+
+This costs nothing: the app never contacts streamscharts.com for it (its website has a bot check,
+which the app does not get around). You do the lookup in your own browser.
+
+### Automatic: Streams Charts API (optional, paid)
+
+With a [Streams Charts API](https://streamscharts.com/api) key
 (API keys screen → *Optional: add a Streams Charts API key*), Twitch and Kick renames are followed:
 
 * **The sheet's ID was renamed.** `GET /api/v2/channels/{old name}?platform=…` returns the channel's

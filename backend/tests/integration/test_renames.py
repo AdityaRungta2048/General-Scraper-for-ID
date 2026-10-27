@@ -1,4 +1,5 @@
-"""Renamed channels, found through the Streams Charts API (optional key)."""
+"""Renamed channels: the free rename checklist (renamed_to column) and the optional
+Streams Charts API key."""
 
 from __future__ import annotations
 
@@ -142,3 +143,65 @@ def test_saving_the_key_uses_free_testing_mode(fake):
         assert "test-sc-token" not in str(client.get("/api/platforms").json())
     checks = [r for r in fake.requests if r.url.host == "streamscharts.com"]
     assert checks and all(r.url.params.get("testing_mode") == "true" for r in checks)
+
+
+# ---- free rename checklist: look it up by hand, type the current name, upload again ----------
+
+
+async def test_rename_checklist_round_trip(fake, sf, tmp_path):
+    fake.add_twitch("oldtwitch", language="de")
+    fake.rename("twitch", "oldtwitch", "newtwitch")
+    fake.add_kick("newtwitch", language="de")
+    fake.add_twitch("samename")
+    fake.add_kick("samename")
+    rows = [["oldtwitch", "Germany", None, None], ["samename", "Spain", None, None]]
+    first = await run(sf, make_workbook(tmp_path / "list.xlsx", TW_KICK, rows))
+    assert first.status == "COMPLETED", first.error_message
+    assert first.verification_json["ok"]
+    out = read(first)
+    assert out[0]["remarks"] == "no Id on both platforms"
+    assert out[0]["streams_charts_link"] == "https://streamscharts.com/channels/oldtwitch?platform=twitch"
+    assert out[0]["renamed_to"] is None
+    assert out[1]["remarks"] is None and out[1]["streams_charts_link"] is None  # matched: nothing to check
+    ws = load_workbook(first.output_path)["Streamers"]
+    link_col = [c.value for c in ws[1]].index("streams_charts_link") + 1
+    assert ws.cell(row=2, column=link_col).hyperlink.target == out[0]["streams_charts_link"]
+
+    # the user found the new name on streamscharts.com and typed it in
+    wb = load_workbook(first.output_path)
+    ws = wb["Streamers"]
+    ws.cell(row=2, column=[c.value for c in ws[1]].index("renamed_to") + 1).value = "newtwitch"
+    again = tmp_path / "list_checked.xlsx"
+    wb.save(again)
+    second = await run(sf, again)
+    assert second.status == "COMPLETED", second.error_message
+    assert second.verification_json["ok"]
+    row = read(second)[0]
+    assert (row["id_twitch"], row["id_kick"], row["remarks"]) == ("oldtwitch", "newtwitch", None)
+    assert row["twitch_id_link"] == "https://www.twitch.tv/newtwitch"
+    assert row["streams_charts_link"] is None and row["renamed_to"] == "newtwitch"
+    assert fake.api_calls("streamscharts.com") == 0  # free: the API is never called
+
+
+async def test_checklist_columns_only_when_something_needs_checking(fake, sf, tmp_path):
+    fake.add_twitch("samename")
+    fake.add_kick("samename")
+    job = await run(sf, make_workbook(tmp_path / "ok.xlsx", TW_KICK, [["samename", "Spain", None, None]]))
+    headers = [c.value for c in load_workbook(job.output_path)["Streamers"][1]]
+    assert headers == [*TW_KICK, "twitch_id_link", "kick_id_link"]
+
+
+async def test_a_typed_name_that_does_not_exist_is_reported(fake, sf, tmp_path):
+    fake.add_twitch("twitchonly")
+    headers = [*TW_KICK, "renamed_to"]
+    rows = [["twitchonly", "Spain", None, None, "nosuchchannel"]]
+    job = await run(sf, make_workbook(tmp_path / "typo.xlsx", headers, rows))
+    assert job.status == "COMPLETED", job.error_message
+    row = read(job)[0]
+    assert row["remarks"] == "no kick id" and row["renamed_to"] == "nosuchchannel"
+    assert "streams_charts_link" not in row  # already checked by hand: nothing to look up
+    with sf() as s:
+        from app.models import ProcessingRow
+
+        reason = s.query(ProcessingRow).filter_by(job_id=job.id).one().reason
+    assert "nosuchchannel" in reason
