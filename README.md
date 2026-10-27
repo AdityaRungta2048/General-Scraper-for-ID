@@ -188,9 +188,14 @@ CHZZK), so accounts are found by exact name, name variants (a small per-row budg
 The platform APIs only know an account's **current** name, so an ID in your sheet that was renamed
 looks like "no such account". There are two ways to handle that.
 
-### Free: the rename checklist (Twitch and Kick sheets)
+### Free: check them by hand (Twitch and Kick sheets)
 
-When some rows get no result, the processed workbook gets two more columns:
+**In the app:** when rows get no result, the job page shows *Check N possibly renamed channel(s)*.
+That page lists those rows, each with a **Streams Charts** link (opens in your browser) and a box
+for the channel's current name. **Save & re-check** re-checks the rows you filled in through the
+official API; the download then has the IDs, and the names you typed in a `renamed_to` column.
+
+**In Excel:** when some rows get no result, the processed workbook also gets two more columns:
 
 | Column | What it holds |
 |---|---|

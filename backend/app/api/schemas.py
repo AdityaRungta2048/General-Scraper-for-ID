@@ -51,6 +51,15 @@ class CredentialsIn(BaseModel):
     values: dict[str, str]
 
 
+class RenameEntry(BaseModel):
+    original_row: int
+    renamed_to: str | None = None  # empty = clear
+
+
+class RenamesIn(BaseModel):
+    items: list[RenameEntry]
+
+
 class RowOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

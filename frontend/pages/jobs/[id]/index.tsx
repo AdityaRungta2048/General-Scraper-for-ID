@@ -38,6 +38,7 @@ export default function JobPage() {
   const [detail, setDetail] = useState<RowDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [toCheck, setToCheck] = useState(0);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -46,6 +47,10 @@ export default function JobPage() {
     setJob(j);
     setRows(page.items);
     setTotal(page.total);
+    if (FINISHED_STATUSES.includes(j.status)) {
+      const renames = await api.renames(id);
+      setToCheck(renames.filter((r) => !r.renamed_to).length);
+    }
   }, [id, filter, offset]);
 
   const refresh = useCallback(() => {
@@ -191,6 +196,15 @@ export default function JobPage() {
                 className="inline-flex items-center rounded-lg bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-200"
               >
                 Review {job.review_count} uncertain row(s)
+              </Link>
+            )}
+            {toCheck > 0 && (
+              <Link
+                href={`/jobs/${job.id}/renames`}
+                className="inline-flex items-center rounded-lg bg-sky-100 px-4 py-2 text-sm font-semibold text-sky-900 hover:bg-sky-200"
+                data-testid="renames-link"
+              >
+                Check {toCheck} possibly renamed channel(s) (free)
               </Link>
             )}
             {job.error_count > 0 && (

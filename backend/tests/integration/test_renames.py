@@ -205,3 +205,58 @@ async def test_a_typed_name_that_does_not_exist_is_reported(fake, sf, tmp_path):
 
         reason = s.query(ProcessingRow).filter_by(job_id=job.id).one().reason
     assert "nosuchchannel" in reason
+
+
+# ---- the same, on the job's "Renamed channels" page (no Excel editing) ------------------------
+
+
+def test_renamed_channels_page(fake, tmp_path):
+    from tests.integration.test_youtube_and_pairs import _finish
+
+    fake.add_twitch("oldtwitch", language="de")
+    fake.rename("twitch", "oldtwitch", "newtwitch")
+    fake.add_kick("newtwitch", language="de")
+    fake.add_twitch("samename")
+    fake.add_kick("samename")
+    rows = [["oldtwitch", "Germany", None, None], ["samename", "Spain", None, None]]
+    path = make_workbook(tmp_path / "page.xlsx", TW_KICK, rows)
+    with TestClient(create_app()) as client:
+        with path.open("rb") as fh:
+            job = client.post("/api/jobs", files={"file": ("page.xlsx", fh)}).json()
+        assert (
+            client.post(f"/api/jobs/{job['id']}/start", json={"target_platforms": ["kick"]}).status_code
+            == 200
+        )
+        assert _finish(client, job["id"])["status"] == "COMPLETED"
+
+        items = client.get(f"/api/jobs/{job['id']}/renames").json()
+        assert [(i["original_row"], i["source_value"], i["remarks"]) for i in items] == [
+            (2, "oldtwitch", "no Id on both platforms")
+        ]
+        assert (
+            items[0]["streams_charts_url"] == "https://streamscharts.com/channels/oldtwitch?platform=twitch"
+        )
+
+        bad = client.post(
+            f"/api/jobs/{job['id']}/renames", json={"items": [{"original_row": 2, "renamed_to": "a b"}]}
+        )
+        assert bad.status_code == 409 and "not a valid Twitch channel name" in bad.json()["detail"]
+        ok = client.post(
+            f"/api/jobs/{job['id']}/renames", json={"items": [{"original_row": 2, "renamed_to": "newtwitch"}]}
+        )
+        assert ok.status_code == 200, ok.text
+        done = _finish(client, job["id"])
+        assert done["status"] == "COMPLETED" and done["verification_json"]["ok"]
+        item = client.get(f"/api/jobs/{job['id']}/renames").json()[0]
+        assert item["renamed_to"] == "newtwitch" and item["results"] == {"kick": "newtwitch"}
+
+        resp = client.get(f"/api/jobs/{job['id']}/download")
+        assert resp.status_code == 200
+    out = tmp_path / "out.xlsx"
+    out.write_bytes(resp.content)
+    ws = load_workbook(out)["Streamers"]
+    headers = [c.value for c in ws[1]]
+    row = {h: ws.cell(row=2, column=i + 1).value for i, h in enumerate(headers)}
+    assert (row["id_kick"], row["remarks"], row["renamed_to"]) == ("newtwitch", None, "newtwitch")
+    assert row["twitch_id_link"] == "https://www.twitch.tv/newtwitch" and row["streams_charts_link"] is None
+    assert fake.api_calls("streamscharts.com") == 0

@@ -171,6 +171,19 @@ export interface ReviewItem {
   other_candidates: CandidateOut[];
 }
 
+/** A row with no result, to look up by hand (free) on streamscharts.com. */
+export interface RenameItem {
+  original_row: number;
+  source_value: string | null;
+  country: string | null;
+  remarks: string | null;
+  renamed_to: string | null;
+  pending: boolean;
+  streams_charts_url: string;
+  results: Record<string, string | null>;
+  reason: string | null;
+}
+
 export interface AppConfig {
   search_engine_fallback: boolean;
   kick_public_profile_enrichment: boolean;
@@ -271,6 +284,9 @@ export const api = {
       target_username?: string | null;
     },
   ) => request<{ verdict: string; rows_updated?: number[] }>(`/jobs/${id}/reviews`, json(body)),
+  renames: (id: string) => request<RenameItem[]>(`/jobs/${id}/renames`),
+  saveRenames: (id: string, items: { original_row: number; renamed_to: string | null }[]) =>
+    request<Job>(`/jobs/${id}/renames`, json({ items })),
   downloadUrl: (id: string) => `/api/jobs/${id}/download`,
   reviewReportUrl: (id: string) => `/api/jobs/${id}/review-report`,
 };
