@@ -83,12 +83,15 @@ def config(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     }
 
 
+OPTIONAL_LABELS = {"brave": "Brave Search", "streamscharts": "Streams Charts"}
+
+
 def _credential_status(settings: Settings, cred: str) -> dict[str, Any]:
     return {
         "id": cred,
-        "label": "Brave Search" if cred == "brave" else label(cred),
+        "label": OPTIONAL_LABELS.get(cred) or label(cred),
         "fields": list(credentials.FIELDS[cred]),
-        "optional": cred == "brave",
+        "optional": cred in credentials.OPTIONAL,
         "keyless": cred in credentials.KEYLESS,  # no official API: switched on, no key
         "configured": credentials.is_configured(settings, cred),
         "source": credentials.source(settings, cred),  # "setup" | "environment" | None

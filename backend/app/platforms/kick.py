@@ -104,28 +104,9 @@ class KickAdapter(PlatformAdapter):
         fetched: dict[str, Profile] = {}
         for batch in chunked(to_fetch, 50):
             for item in await lookup.run(batch):
-                slug = str(item.get("slug", "")).lower()
-                if not slug:
-                    continue
-                stream = item.get("stream") or {}
-                category = item.get("category") or {}
-                fetched[slug] = Profile(
-                    platform=self.platform,
-                    username=slug,
-                    user_id=str(item["broadcaster_user_id"])
-                    if item.get("broadcaster_user_id") is not None
-                    else None,
-                    description=item.get("channel_description") or None,
-                    profile_url=self.profile_url(slug),
-                    category=(category.get("name") if isinstance(category, dict) else None) or None,
-                    stream_title=item.get("stream_title") or None,
-                    tags=[str(t) for t in (stream.get("custom_tags") or [])]
-                    if isinstance(stream, dict)
-                    else [],
-                    language=(stream.get("language") if isinstance(stream, dict) else None) or None,
-                    is_live=bool(stream.get("is_live")) if isinstance(stream, dict) else None,
-                    source="kick-public-v1",
-                )
+                prof = self._profile(item)
+                if prof is not None:
+                    fetched[prof.username] = prof
 
         if fetched:
             await self._enrich_users(list(fetched.values()))
@@ -143,6 +124,44 @@ class KickAdapter(PlatformAdapter):
             else:
                 self.cache.set(f"{self.NS}:channel", h, prof.to_dict(), self.cache_ttl, source="kick")
         return result
+
+    def _profile(self, item: dict[str, Any]) -> Profile | None:
+        slug = str(item.get("slug", "")).lower()
+        if not slug:
+            return None
+        stream = item.get("stream") or {}
+        category = item.get("category") or {}
+        return Profile(
+            platform=self.platform,
+            username=slug,
+            user_id=str(item["broadcaster_user_id"]) if item.get("broadcaster_user_id") is not None else None,
+            description=item.get("channel_description") or None,
+            profile_url=self.profile_url(slug),
+            category=(category.get("name") if isinstance(category, dict) else None) or None,
+            stream_title=item.get("stream_title") or None,
+            tags=[str(t) for t in (stream.get("custom_tags") or [])] if isinstance(stream, dict) else [],
+            language=(stream.get("language") if isinstance(stream, dict) else None) or None,
+            is_live=bool(stream.get("is_live")) if isinstance(stream, dict) else None,
+            source="kick-public-v1",
+        )
+
+    async def find_by_ids(self, ids: list[str]) -> dict[str, Profile | None]:
+        """Channels by broadcaster user id (the official API's other lookup key)."""
+        wanted = dedupe([i for i in ids if i.isdigit()])
+        found: dict[str, Profile] = {}
+        for batch in chunked(wanted, 50):
+            body = await self.http.get_json(
+                "channels",
+                params=[("broadcaster_user_id", i) for i in batch],
+                endpoint_category="kick.channels",
+            )
+            for item in _data(body, "channels"):
+                prof = self._profile(item)
+                if prof is not None and prof.user_id:
+                    found[prof.user_id] = prof
+        if found:
+            await self._enrich_users(list(found.values()))
+        return {i: found.get(i) for i in wanted}
 
     async def _enrich_users(self, profiles: list[Profile]) -> None:
         by_id = {p.user_id: p for p in profiles if p.user_id}

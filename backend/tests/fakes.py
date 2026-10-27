@@ -91,6 +91,9 @@ class FakePlatforms:
         self.keys_checked = True  # False = accept any chzzk/steam key except "wrong" (demo)
         self.images: dict[str, bytes] = {}
         self.brave: dict[str, list[str]] = {}
+        # Streams Charts: (platform, name) -> channel record; the names it knows incl. old ones
+        self.streamscharts: dict[tuple[str, str], dict[str, Any]] = {}
+        self.streamscharts_keys = ("test-sc-id", "test-sc-token")
         self.failures: list[FailureRule] = []
         self.calls: Counter[str] = Counter()
         self.requests: list[httpx.Request] = []
@@ -255,6 +258,32 @@ class FakePlatforms:
         }
         return uid
 
+    def rename(self, platform: str, old: str, new: str) -> str:
+        """Rename a Twitch/Kick account; Streams Charts still knows it by the old name."""
+        store = self.twitch if platform == "twitch" else self.kick
+        rec = store.pop(old)
+        if platform == "twitch":
+            rec["login"] = new
+            rec["_channel"]["broadcaster_login"] = new
+            uid = rec["id"]
+            avatar = rec["profile_image_url"]
+        else:
+            rec["slug"] = new
+            rec["_user"]["name"] = new  # a Kick username and its slug change together
+            uid = str(rec["broadcaster_user_id"])
+            avatar = rec["_user"]["profile_picture"]
+        store[new] = rec
+        record = {
+            "platform": platform,
+            "channel_name": new,
+            "channel_display_name": new,
+            "channel_id": uid,
+            "avatar_url": avatar,
+        }
+        self.streamscharts[(platform, old)] = record
+        self.streamscharts[(platform, new)] = record
+        return uid
+
     def fail(
         self,
         predicate: Callable[[httpx.Request], bool],
@@ -303,6 +332,18 @@ class FakePlatforms:
             "rumble.com",
         }:
             return self._extra_platform(host, url.path, q, request)
+        if host == "streamscharts.com" and url.path.startswith("/api/v2/channels/"):
+            if (request.headers.get("Client-ID"), request.headers.get("Token")) != self.streamscharts_keys:
+                return httpx.Response(401, json={"error": {"code": "unauthorized"}})
+            if q.get("testing_mode") == ["true"]:
+                return httpx.Response(
+                    200, json={"data": {"platform": "twitch", "channel_name": "samplestreamer"}}
+                )
+            name = url.path.removeprefix("/api/v2/channels/").lower()
+            record = self.streamscharts.get((q.get("platform", [""])[0], name))
+            if record is None:
+                return httpx.Response(404, json={"error": {"code": "not_found"}})
+            return httpx.Response(200, json={"data": record})
         if host == "api.search.brave.com":
             query = q.get("q", [""])[0]
             return httpx.Response(
@@ -330,10 +371,11 @@ class FakePlatforms:
                     400,
                     json={"error": "Bad Request", "message": "Invalid login names, emails or IDs in request"},
                 )
+            ids = set(q.get("id", []))
             data = [
-                {k: v for k, v in self.twitch[x].items() if not k.startswith("_")}
-                for x in logins
-                if x in self.twitch
+                {k: v for k, v in u.items() if not k.startswith("_")}
+                for u in self.twitch.values()
+                if u["login"] in logins or u["id"] in ids
             ]
             return httpx.Response(200, json={"data": data})
         if path == "/helix/channels":
@@ -374,10 +416,11 @@ class FakePlatforms:
             slugs = [s.lower() for s in q.get("slug", [])]
             if len(slugs) > 50 or any(len(s) > 25 for s in slugs):
                 return httpx.Response(400, json={"message": "invalid slug param"})
+            ids = {int(i) for i in q.get("broadcaster_user_id", [])}
             data = [
-                {k: v for k, v in self.kick[s].items() if not k.startswith("_")}
-                for s in slugs
-                if s in self.kick
+                {k: v for k, v in c.items() if not k.startswith("_")}
+                for c in self.kick.values()
+                if c["slug"] in slugs or c["broadcaster_user_id"] in ids
             ]
             return httpx.Response(200, json={"data": data, "message": "OK"})
         if path == "/public/v1/users":

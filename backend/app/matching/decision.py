@@ -79,6 +79,8 @@ class CandidateEvaluation:
             "stream_title": c.stream_title,
             "language": c.language,
             "tags": c.tags,
+            "former_names": c.former_names,
+            "rename_confirmed": c.rename_confirmed,
             "discovered_via": self.discovered_via,
             "points": round(self.points, 2),
             "confidence": round(self.confidence, 1),

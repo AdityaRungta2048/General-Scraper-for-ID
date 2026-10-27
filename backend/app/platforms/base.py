@@ -33,6 +33,10 @@ class Profile:
     broadcaster_type: str | None = None
     created_at: str | None = None
     source: str | None = None
+    # earlier channel names of this account (from Streams Charts) and whether its channel ID
+    # confirmed the rename (None = not renamed)
+    former_names: list[str] = field(default_factory=list)
+    rename_confirmed: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -112,6 +116,11 @@ class PlatformAdapter(ABC):
     @abstractmethod
     async def get_image(self, url: str) -> bytes | None:
         """Download a public profile image (None if unavailable)."""
+
+    async def find_by_ids(self, ids: list[str]) -> dict[str, Profile | None]:
+        """Lookup by the platform's numeric account id (keeps working after a rename).
+        Only Twitch and Kick implement it."""
+        return {}
 
     async def find_exact_account(self, handle: str) -> Profile | None:
         return (await self.find_exact_accounts([handle])).get(handle)

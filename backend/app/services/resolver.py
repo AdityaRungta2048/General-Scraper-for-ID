@@ -4,6 +4,10 @@
     (or, if the source does not exist, a strictly deterministic same-name check on
     the target platform, verified only by an explicit back-link)
 
+With a Streams Charts key, renamed channels are followed too: a source ID that no longer
+exists is looked up under its earlier name, and when nothing on the other platform has the
+source's name, so is the other platform's channel that used to have it.
+
 Manual review verdicts are applied afterwards (``apply_manual_reviews``) so cached
 resolutions never bake in human decisions.
 """
@@ -25,6 +29,7 @@ from app.matching.social import canonical_platform_handle, extract_identities
 from app.matching.text import COUNTRY_LANGUAGES, GENERIC_CATEGORIES, normalize_language
 from app.matching.verifier import IdentityVerifier
 from app.platforms.base import PlatformAdapter, Profile, dedupe, written_id
+from app.platforms.streams_charts import StreamsChartsRenames
 from app.services.stores import ProfileStore
 from app.version import MATCHING_ENGINE_VERSION
 
@@ -44,6 +49,7 @@ class IdentityResolver:
         cache: CacheService,
         profile_store: ProfileStore | None = None,
         resolution_ttl: int = 3 * 86400,
+        renames: StreamsChartsRenames | None = None,
     ) -> None:
         self.adapters = adapters
         self.generator = generator
@@ -51,6 +57,7 @@ class IdentityResolver:
         self.cache = cache
         self.profile_store = profile_store
         self.resolution_ttl = resolution_ttl
+        self.renames = renames
 
     def cache_key(self, source_platform: str, target_platform: str, key: str, country: str | None) -> str:
         return (
@@ -92,6 +99,12 @@ class IdentityResolver:
         if key is not None:
             found = await src_adapter.find_exact_accounts(src_adapter.existence_variants(key))
             source = next((p for p in found.values() if p is not None), None)
+            if source is None and self.renames is not None:
+                renamed = await self.renames.renamed_account(src_adapter, key)
+                # an unconfirmed rename is not enough to treat the account as the sheet's
+                if renamed is not None and renamed.rename_confirmed:
+                    source = renamed
+                    base["renamed_source"] = {"from": key, "to": renamed.username}
 
         if source is None:
             result = await self._resolve_source_missing(
@@ -127,10 +140,15 @@ class IdentityResolver:
             self.profile_store.upsert(source, s_ids)
         refs = await self.generator.generate(source, tgt_adapter, s_ids, rejected)
         pairs = [(r.profile, sorted(r.via)) for r in refs if r.profile is not None]
+        pairs += await self._former_name_targets(source, tgt_adapter, pairs, rejected)
         if self.profile_store:
             for prof, _ in pairs:
                 self.profile_store.upsert(prof, extract_identities(prof))
         evals = await self.verifier.verify(source, pairs, country, src_adapter, tgt_adapter)
+        if self.renames is not None and not any(rule_hits(source.to_dict(), e.to_dict()) for e in evals):
+            renamed = await self._renamed_targets(source, tgt_adapter, pairs, rejected)
+            if renamed:
+                evals += await self.verifier.verify(source, renamed, country, src_adapter, tgt_adapter)
         agg = aggregate(evals)
         best = agg.best
         ranked = sorted(evals, key=lambda e: (-e.confidence, -e.points))[:10]
@@ -152,6 +170,43 @@ class IdentityResolver:
             "candidates": [e.to_dict() for e in ranked],
         }
 
+    async def _former_name_targets(
+        self,
+        source: Profile,
+        tgt_adapter: PlatformAdapter,
+        pairs: list[tuple[Profile, list[str]]],
+        rejected: set[str] | None,
+    ) -> list[tuple[Profile, list[str]]]:
+        """Target accounts that have a renamed source's earlier name (official lookup, free)."""
+        known = {p.username for p, _ in pairs} | set(rejected or ())
+        handles = [h for h in (tgt_adapter.to_handle(n) for n in source.former_names) if h and h not in known]
+        if not handles:
+            return []
+        found = await tgt_adapter.find_exact_accounts(dedupe(handles))
+        return [(p, ["source_former_name"]) for p in found.values() if p is not None]
+
+    async def _renamed_targets(
+        self,
+        source: Profile,
+        tgt_adapter: PlatformAdapter,
+        pairs: list[tuple[Profile, list[str]]],
+        rejected: set[str] | None,
+    ) -> list[tuple[Profile, list[str]]]:
+        """Target accounts that were renamed away from one of the source's names (Streams
+        Charts). Asked only when no candidate matched, for names nobody uses today."""
+        assert self.renames is not None
+        known = {p.username for p, _ in pairs} | set(rejected or ())
+        names = [source.username, *source.former_names]
+        out: list[tuple[Profile, list[str]]] = []
+        for handle in dedupe([h for h in (tgt_adapter.to_handle(n) for n in names) if h]):
+            if await tgt_adapter.find_exact_account(handle) is not None:
+                continue  # the name is in use today, so it is not a renamed channel
+            prof = await self.renames.renamed_account(tgt_adapter, handle)
+            if prof is not None and prof.username not in known:
+                known.add(prof.username)
+                out.append((prof, ["streams_charts_rename"]))
+        return out
+
     async def _resolve_source_missing(
         self,
         base: dict[str, Any],
@@ -170,6 +225,12 @@ class IdentityResolver:
         )
         found = await tgt_adapter.find_exact_accounts(handles) if handles else {}
         targets = [p for p in found.values() if p is not None and p.username not in (rejected or set())]
+        if not targets and self.renames is not None:
+            for handle in handles:
+                prof = await self.renames.renamed_account(tgt_adapter, handle)
+                if prof is not None and prof.username not in (rejected or set()):
+                    targets.append(prof)
+                    break
         src_canonical = canonical_platform_handle(src_adapter.platform, name)
         evals: list[CandidateEvaluation] = []
         verified: CandidateEvaluation | None = None
@@ -338,7 +399,7 @@ def _display_from_candidate(c: dict[str, Any]) -> str:
 # its language does not fit the sheet's country (then REVIEW).
 # ---------------------------------------------------------------------------------------
 _NAME_SEPARATORS = re.compile(r"[\s._-]+")
-RULES = ("exact same name", "same profile picture", "exact same bio")
+RULES = ("exact same name", "same profile picture", "exact same bio", "same name before a rename")
 
 
 def _same_name(a: Any, b: Any) -> bool:
@@ -368,6 +429,11 @@ def rule_hits(source: dict[str, Any], candidate: dict[str, Any]) -> list[str]:
         source.get("extra_bio"), candidate.get("description")
     ):
         hits.append(RULES[2])
+    # a channel renamed on either side (Streams Charts) still had the other one's name
+    names_a = [source.get("username"), *(source.get("former_names") or [])]
+    names_b = [candidate.get("username"), *(candidate.get("former_names") or [])]
+    if RULES[0] not in hits and any(_same_name(a, b) for a in names_a for b in names_b):
+        hits.append(RULES[3])
     return hits
 
 
@@ -396,6 +462,8 @@ def contradictions(
         out.append("different profile pictures")
     if strengths.get("cross_link") == Strength.CONFLICT.value:
         out.append("links to a different account")
+    if candidate.get("rename_confirmed") is False:
+        out.append("its rename could not be confirmed by the channel ID")
     return out
 
 
@@ -448,8 +516,15 @@ def apply_match_rules(resolution: dict[str, Any]) -> dict[str, Any]:
         best = live[0] if live else None
         problems = contradictions({}, best, res.get("country"), [RULES[0]]) if best else []
         decision = ("REVIEW" if problems else "MATCH") if best else "NO_MATCH"
-        why = f"source {src_pf} account does not exist; same-name {tgt_pf} account found" + (
-            f", but {'; '.join(problems)}" if problems else ""
+        renamed = bool(best and best.get("former_names"))
+        why = (
+            f"source {src_pf} account does not exist; "
+            + (
+                f"the {tgt_pf} channel had the same name before a rename (Streams Charts)"
+                if renamed
+                else f"same-name {tgt_pf} account found"
+            )
+            + (f", but {'; '.join(problems)}" if problems else "")
         )
         res["target_status"] = (
             "VERIFIED" if decision == "MATCH" else ("EXISTS_UNVERIFIED" if cands else "NOT_FOUND")
@@ -485,4 +560,7 @@ def apply_match_rules(resolution: dict[str, Any]) -> dict[str, Any]:
                 else f"Source {src_pf} account does not exist and no same-name {tgt_pf} account exists."
             ),
         )
+    if res.get("renamed_source"):
+        r = res["renamed_source"]
+        res["reason"] = f"{res['reason']} (The {src_pf} channel {r['from']} is now called {r['to']}.)"
     return res

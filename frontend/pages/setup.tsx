@@ -7,6 +7,15 @@ import { Alert, Button, Card } from "@/components/ui";
 import { markSetupSeen, readyCount } from "@/lib/format";
 import { api, type PlatformStatus } from "@/services/api";
 
+const OPTIONAL_HINTS: Record<string, string> = {
+  brave:
+    "Not about the Brave browser (any browser works). Brave Search is an extra search engine the app can use " +
+    "to find hard-to-find accounts; it needs its own API key.",
+  streamscharts:
+    "Finds Twitch and Kick channels that were renamed (Streams Charts still knows their old names). " +
+    "Paid API: 1 credit per channel found.",
+};
+
 export default function Setup() {
   const router = useRouter();
   const [platforms, setPlatforms] = useState<PlatformStatus[] | null>(null);
@@ -76,13 +85,10 @@ export default function Setup() {
             <PlatformKeys key={p.id} status={p} onChange={update} />
           ) : (
             <div key={p.id} className="px-1">
-              <Button variant="secondary" onClick={() => setShowOptional(true)} data-testid="show-brave">
-                Optional: add a Brave Search API key
+              <Button variant="secondary" onClick={() => setShowOptional(true)} data-testid={`show-${p.id}`}>
+                Optional: add a {p.label} API key
               </Button>
-              <p className="mt-1 text-xs text-zinc-500">
-                Not about the Brave browser (any browser works). Brave Search is an extra search engine the app can
-                use to find hard-to-find accounts; it needs its own API key.
-              </p>
+              <p className="mt-1 text-xs text-zinc-500">{OPTIONAL_HINTS[p.id]}</p>
             </div>
           ),
         )}

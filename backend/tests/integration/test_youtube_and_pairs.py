@@ -126,7 +126,8 @@ def client(fake):
 def test_platform_status_never_returns_key_values(client):
     rows = client.get("/api/platforms").json()
     assert {r["id"] for r in rows} == {
-        "twitch", "kick", "youtube", "chzzk", "soop", "steam", "bigo", "nimo", "rumble", "brave",
+        "twitch", "kick", "youtube", "chzzk", "soop", "steam", "bigo", "nimo", "rumble",
+        "brave", "streamscharts",
     }  # fmt: skip
     assert "test-yt-key" not in str(rows) and "test-twitch-secret" not in str(rows)
     yt = next(r for r in rows if r["id"] == "youtube")
