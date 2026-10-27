@@ -16,6 +16,7 @@ from app.platforms.kick import KickAdapter
 from app.platforms.public_sites import BigoAdapter, NimoAdapter, RumbleAdapter, SoopAdapter
 from app.platforms.search_engine import BraveSearchEngine, DisabledSearchEngine, SearchEngineProvider
 from app.platforms.steam import SteamAdapter
+from app.platforms.streams_charts import StreamsChartsRenames
 from app.platforms.twitch import TwitchAdapter
 from app.platforms.youtube import YouTubeAdapter
 
@@ -27,6 +28,7 @@ class PlatformBundle:
     adapters: dict[str, PlatformAdapter]
     search_engine: SearchEngineProvider
     clients: list[httpx.AsyncClient]
+    renames: StreamsChartsRenames | None = None
 
     def adapter(self, platform: str) -> PlatformAdapter:
         if platform not in self.adapters:
@@ -191,6 +193,24 @@ def build_platforms(
             cache,
             settings.cache_ttl,
         )
+    renames: StreamsChartsRenames | None = None
+    if credentials.is_configured(settings, "streamscharts"):
+        sc = credentials.get(settings, "streamscharts")
+        renames = StreamsChartsRenames(
+            PlatformHttpClient(
+                platform="streamscharts",
+                base_url=settings.streamscharts_api_base,
+                client=api_client,
+                token=StaticKeyToken("streamscharts", sc["token"]),
+                auth_headers=lambda t: {"Client-ID": sc["client_id"], "Token": t},
+                concurrency=1,
+                requests_per_minute=settings.streamscharts_requests_per_minute,
+                burst=settings.request_burst,
+                retry=retry,
+            ),
+            cache,
+            settings.streamscharts_time,
+        )
     return PlatformBundle(
         adapters={
             "twitch": twitch,
@@ -202,4 +222,5 @@ def build_platforms(
         },
         search_engine=search,
         clients=[api_client, image_client],
+        renames=renames,
     )

@@ -77,6 +77,7 @@ def build_context(
         cache,
         profile_store,
         settings.resolution_cache_ttl,
+        renames=platforms.renames,
     )
     return MatchingContext(resolver=resolver, platforms=platforms, cache=cache)
 
@@ -145,5 +146,17 @@ async def check_credentials(settings: Settings, cred: str, values: dict[str, str
                 retry=retry,
             )
             await http.get_json("", params={"q": "twitch", "count": 1})
+            return
+        if cred == "streamscharts":
+            http = PlatformHttpClient(
+                platform="streamscharts",
+                base_url=settings.streamscharts_api_base,
+                client=client,
+                token=StaticKeyToken("streamscharts", values["token"]),
+                auth_headers=lambda t: {"Client-ID": values["client_id"], "Token": t},
+                retry=retry,
+            )
+            # testing mode: checks the key, returns sample data and is never charged
+            await http.get_json("channels/shroud", params={"platform": "twitch", "testing_mode": "true"})
             return
     raise ValueError(f"unknown credential {cred!r}")

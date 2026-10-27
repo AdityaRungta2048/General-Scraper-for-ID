@@ -86,6 +86,7 @@ async def process_job(
                     ProcessingRow.source_key,
                     ProcessingRow.country,
                     ProcessingRow.target_platform,
+                    ProcessingRow.renamed_to,
                 )
                 .where(
                     ProcessingRow.job_id == job_id,
@@ -97,12 +98,12 @@ async def process_job(
         verdicts = {t: manual_verdicts(s, job_id, platform, t) for t in targets}
         s.commit()
 
-    # Group rows by the identity that will be resolved: (destination, source id, country).
-    # Duplicates are resolved once per destination.
-    groups: dict[tuple[str, str, str], list[int]] = defaultdict(list)
-    first_value: dict[tuple[str, str, str], tuple[str, str | None]] = {}
+    # Group rows by the identity that will be resolved: (source id, country, destination, the
+    # current name typed in "renamed_to"). Duplicates are resolved once per destination.
+    groups: dict[tuple[str, str, str, str], list[int]] = defaultdict(list)
+    first_value: dict[tuple[str, str, str, str], tuple[str, str | None]] = {}
     empty_rows: list[int] = []
-    for row_id, _orig, value, key, country, target in pending:
+    for row_id, _orig, value, key, country, target, renamed_to in pending:
         if value is None or not str(value).strip():
             empty_rows.append(row_id)
             continue
@@ -110,6 +111,7 @@ async def process_job(
             key or f"invalid:{str(value).strip().lower()}",
             (country or "").strip().lower(),
             str(target),
+            (renamed_to or "").strip(),
         )
         groups[gk].append(row_id)
         first_value.setdefault(gk, (str(value), country))
@@ -137,7 +139,7 @@ async def process_job(
     db_lock = asyncio.Lock()
     last_counts = [0.0]
 
-    async def run_group(gk: tuple[str, str, str], row_ids: list[int]) -> None:
+    async def run_group(gk: tuple[str, str, str, str], row_ids: list[int]) -> None:
         nonlocal cancelled
         if fatal or cancelled:
             return
@@ -154,7 +156,9 @@ async def process_job(
             resolution: dict[str, Any] | None = None
             error: PlatformError | Exception | None = None
             try:
-                resolution = await ctx.resolver.resolve(platform, gk[2], value, country)
+                resolution = await ctx.resolver.resolve(
+                    platform, gk[2], value, country, renamed_to=gk[3] or None
+                )
             except ConfigurationError as exc:
                 fatal.append(str(exc))
                 error = exc

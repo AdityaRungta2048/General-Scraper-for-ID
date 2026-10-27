@@ -58,6 +58,9 @@ class CellWrite:
     remarks: str | None
     # {"<platform>": "<link url>", ...}; None = leave the link cells untouched
     links: dict[str, str | None] | None = None
+    # the channel's current name for the "renamed_to" column
+    renamed_to: str | None = None
+    write_renamed: bool = False
 
 
 def first_url(text: str | None) -> str | None:
@@ -94,6 +97,8 @@ def expected_cell_values(writes: list[CellWrite], columns: ColumnMap) -> dict[tu
             expected[(w.original_row, columns.dest_col(target))] = value
         if w.write_remarks:
             expected[(w.original_row, rem_col)] = w.remarks
+        if w.write_renamed and columns.renamed is not None:
+            expected[(w.original_row, columns.renamed)] = w.renamed_to
         if w.links is not None:
             for platform, text in w.links.items():
                 col = columns.link_col(platform)

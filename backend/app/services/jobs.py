@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from dataclasses import replace
 from datetime import UTC, datetime
 from itertools import groupby
 from pathlib import Path
@@ -14,7 +15,13 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.excel.exporter import CellWrite, ExportError, export_processed, output_filename
-from app.excel.importer import ColumnMap, WorkbookAnalysis, analyze_workbook, read_rows
+from app.excel.importer import (
+    CHECK_LINK_KEY,
+    ColumnMap,
+    WorkbookAnalysis,
+    analyze_workbook,
+    read_rows,
+)
 from app.excel.review_report import review_filename, write_review_report
 from app.excel.state_machine import (
     OLD_NEAREST_REMARKS,
@@ -101,6 +108,7 @@ def start_job(
                     country=r.country,
                     existing_destination=r.existing_destinations[target],
                     existing_remarks=r.existing_remarks,
+                    renamed_to=(r.renamed_to or "").strip() or None,
                     status=RowStatus.PENDING.value,
                 )
             )
@@ -314,9 +322,23 @@ def build_export(session: Session, settings: Settings, job: ProcessingJob) -> di
             if found is not None:
                 links = links or {}
                 links.update({p: u for p, u in found.items() if u is not None or p not in links})
+        if links is not None and columns.link_col(CHECK_LINK_KEY) is not None:
+            links[CHECK_LINK_KEY] = rename_check_link(done, platform)
         first = done[0]
         if dests or first.write_remarks or links is not None:
-            writes.append(CellWrite(original_row, dests, first.write_remarks, first.output_remarks, links))
+            writes.append(
+                CellWrite(
+                    original_row,
+                    dests,
+                    first.write_remarks,
+                    first.output_remarks,
+                    links,
+                    # a name entered on the Renamed channels page is recorded in the sheet too
+                    renamed_to=first.renamed_to,
+                    write_renamed=columns.renamed is not None and links is not None,
+                )
+            )
+    drop_unused_checklist(columns, writes)
     out_dir = settings.outputs_dir / job.id
     out_path = out_dir / output_filename(job.filename)
     try:
@@ -417,6 +439,47 @@ def _row_report_dict(r: ProcessingRow) -> dict[str, Any]:
 
 def verdict_key(row: ProcessingRow) -> str:
     return row.source_key or f"invalid:{(row.source_value or '').strip().lower()}"
+
+
+def drop_unused_checklist(columns: ColumnMap, writes: list[CellWrite]) -> None:
+    """Add the rename-checklist columns only when they hold something: a link to check, or a
+    current name entered on the Renamed channels page."""
+    added = columns.new_headers or {}
+    link_col = columns.link_col(CHECK_LINK_KEY)
+    new_renamed = columns.renamed is not None and str(columns.renamed) in added
+    if link_col is not None and str(link_col) in added:
+        if any((w.links or {}).get(CHECK_LINK_KEY) for w in writes) or (
+            new_renamed and any(w.renamed_to for w in writes)
+        ):
+            return
+        for w in writes:
+            (w.links or {}).pop(CHECK_LINK_KEY, None)
+        (columns.links or {}).pop(CHECK_LINK_KEY, None)
+        added.pop(str(link_col), None)
+    if new_renamed and not any(w.renamed_to for w in writes):
+        added.pop(str(columns.renamed), None)
+        columns.renamed = None
+        for i, w in enumerate(writes):
+            writes[i] = replace(w, write_renamed=False)
+
+
+def streams_charts_url(source_key: str, source_platform: str) -> str:
+    return f"https://streamscharts.com/channels/{source_key}?platform={source_platform}"
+
+
+def needs_check(rows: list[ProcessingRow]) -> bool:
+    """A destination found nothing (an API error is retried instead, not looked up by hand)."""
+    states = [(r.evidence_json or {}).get("link_state") for r in rows]
+    return None not in states and any(s not in ("match", "preserved") for s in states)
+
+
+def rename_check_link(rows: list[ProcessingRow], source_platform: str) -> str | None:
+    """Rename checklist: the source channel's Streams Charts page, for rows where a destination
+    found nothing and no current name was entered yet. The user looks it up there by hand (free)
+    and types the channel's current name into "renamed_to" (sheet or Renamed channels page)."""
+    if any(r.renamed_to for r in rows) or not rows[0].source_key or not needs_check(rows):
+        return None
+    return streams_charts_url(rows[0].source_key, source_platform)
 
 
 def channel_links(

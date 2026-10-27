@@ -41,6 +41,7 @@ const LABELS: Record<string, string> = {
   nimo: "Nimo TV",
   rumble: "Rumble",
   brave: "Brave Search",
+  streamscharts: "Streams Charts",
 };
 
 export function platformLabel(p: Platform | null | undefined): string {

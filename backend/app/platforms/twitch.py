@@ -80,21 +80,9 @@ class TwitchAdapter(PlatformAdapter):
         fetched: dict[str, Profile] = {}
         for batch in chunked(to_fetch, 100):
             for item in await lookup.run(batch):
-                login = str(item.get("login", "")).lower()
-                if not login:
-                    continue
-                fetched[login] = Profile(
-                    platform=self.platform,
-                    username=login,
-                    user_id=str(item.get("id")) if item.get("id") is not None else None,
-                    display_name=item.get("display_name") or None,
-                    description=item.get("description") or None,
-                    profile_image_url=item.get("profile_image_url") or None,
-                    profile_url=self.profile_url(login),
-                    broadcaster_type=item.get("broadcaster_type") or None,
-                    created_at=item.get("created_at") or None,
-                    source="twitch-helix",
-                )
+                prof = self._profile(item)
+                if prof is not None:
+                    fetched[prof.username] = prof
 
         if fetched:
             await self._enrich_channels(list(fetched.values()))
@@ -106,6 +94,38 @@ class TwitchAdapter(PlatformAdapter):
             else:
                 self.cache.set(f"{self.NS}:user", h, prof.to_dict(), self.cache_ttl, source="helix")
         return result
+
+    def _profile(self, item: dict[str, Any]) -> Profile | None:
+        login = str(item.get("login", "")).lower()
+        if not login:
+            return None
+        return Profile(
+            platform=self.platform,
+            username=login,
+            user_id=str(item.get("id")) if item.get("id") is not None else None,
+            display_name=item.get("display_name") or None,
+            description=item.get("description") or None,
+            profile_image_url=item.get("profile_image_url") or None,
+            profile_url=self.profile_url(login),
+            broadcaster_type=item.get("broadcaster_type") or None,
+            created_at=item.get("created_at") or None,
+            source="twitch-helix",
+        )
+
+    async def find_by_ids(self, ids: list[str]) -> dict[str, Profile | None]:
+        wanted = dedupe([i for i in ids if i.isdigit()])
+        found: dict[str, Profile] = {}
+        for batch in chunked(wanted, 100):
+            body = await self.http.get_json(
+                "users", params=[("id", i) for i in batch], endpoint_category="helix.users"
+            )
+            for item in _data(body, "helix/users"):
+                prof = self._profile(item)
+                if prof is not None and prof.user_id:
+                    found[prof.user_id] = prof
+        if found:
+            await self._enrich_channels(list(found.values()))
+        return {i: found.get(i) for i in wanted}
 
     async def _enrich_channels(self, profiles: list[Profile]) -> None:
         by_id = {p.user_id: p for p in profiles if p.user_id}

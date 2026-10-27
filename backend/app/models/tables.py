@@ -141,6 +141,8 @@ class ProcessingRow(Base):
     country: Mapped[str | None] = mapped_column(String(128), nullable=True)
     existing_destination: Mapped[str | None] = mapped_column(String(512), nullable=True)
     existing_remarks: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # the source channel's current name, typed by the user in the "renamed_to" column
+    renamed_to: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     status: Mapped[str] = mapped_column(String(24), default=RowStatus.PENDING.value)
     source_status: Mapped[str | None] = mapped_column(String(24), nullable=True)

@@ -183,6 +183,55 @@ responses, but were not tested against the live sites; if a site changes, only t
 (`backend/app/platforms/public_sites.py`) needs updating. None of the six has a usable search (except
 CHZZK), so accounts are found by exact name, name variants (a small per-row budget) and links in bios.
 
+## 5d. Renamed channels
+
+The platform APIs only know an account's **current** name, so an ID in your sheet that was renamed
+looks like "no such account". There are two ways to handle that.
+
+### Free: check them by hand (Twitch and Kick sheets)
+
+**In the app:** when rows get no result, the job page shows *Check N possibly renamed channel(s)*.
+That page lists those rows, each with a **Streams Charts** link (opens in your browser) and a box
+for the channel's current name. **Save & re-check** re-checks the rows you filled in through the
+official API; the download then has the IDs, and the names you typed in a `renamed_to` column.
+
+**In Excel:** when some rows get no result, the processed workbook also gets two more columns:
+
+| Column | What it holds |
+|---|---|
+| `streams_charts_link` | For rows with no result: the source channel's page on streamscharts.com. |
+| `renamed_to` | Empty. You type the channel's **current** name here. |
+
+1. Click a row's link (or paste the old ID into the streamscharts.com search bar and click the
+   result). Streams Charts shows the channel under its current name and its other channels.
+2. The ID in your sheet was renamed → type the current name in `renamed_to`. The other platform's
+   channel is listed there instead → you can type it straight into its `id_<platform>` cell.
+3. Upload the workbook again. Rows with `renamed_to` use that account (checked through the official
+   API; the matching rules apply as usual), the link column points to the current channel, and
+   your ID cell is kept. A name that doesn't exist is noted in the row's reason.
+
+This costs nothing: the app never contacts streamscharts.com for it (its website has a bot check,
+which the app does not get around). You do the lookup in your own browser.
+
+### Automatic: Streams Charts API (optional, paid)
+
+With a [Streams Charts API](https://streamscharts.com/api) key
+(API keys screen → *Optional: add a Streams Charts API key*), Twitch and Kick renames are followed:
+
+* **The sheet's ID was renamed.** `GET /api/v2/channels/{old name}?platform=…` returns the channel's
+  id; the current account is read from the official Twitch/Kick API by that id and used as the
+  source. The ID cell keeps your value; the link column points to the current channel.
+* **The other platform's channel was renamed.** When nothing on the other platform matched, the
+  same lookup is made for the source's name there. A channel that used to have the exact same name
+  counts like an exact name match (rule *same name before a rename*), with the usual
+  category/language/country checks.
+* A rename counts only when the platform's own API confirms it by channel id (for Kick, the id must
+  also agree with the picture or name Streams Charts reports). Otherwise the row goes to **Review**.
+* Cost: 1 credit per channel found; names Streams Charts doesn't know (404) are free. It is only
+  asked for rows that would otherwise get no match. **Save & test** uses its free testing mode.
+* Only the official API is used. If streamscharts.com answers with a bot check (Cloudflare), the job
+  stops with that message: the app never gets around bot checks.
+
 ## 6. OAuth configuration
 
 Both platforms use the **OAuth 2 client-credentials** flow (server-to-server *app access tokens*):

@@ -334,6 +334,14 @@ class PlatformHttpClient:
                         )
                     if reasons & _GOOGLE_SLOW_DOWN:
                         status = 429
+                if status == 403 and resp.headers.get("cf-mitigated") == "challenge":
+                    # A bot check is not an answer, and this app never tries to get past one.
+                    raise ConfigurationError(
+                        f"{self.platform} answered with a Cloudflare bot check instead of data "
+                        f"({endpoint_category}); this app does not get around bot checks",
+                        platform=self.platform,
+                        status_code=status,
+                    )
                 if status == 401 and self.token is not None and not refreshed:
                     self.token.invalidate()
                     refreshed = True

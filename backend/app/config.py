@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # platforms without an official API, switched on without the setup screen (comma list)
     public_lookup_platforms: str = ""
     brave_search_api_key: SecretStr = SecretStr("")
+    # optional: Streams Charts API, used to find channels that were renamed
+    streamscharts_client_id: str = ""
+    streamscharts_token: SecretStr = SecretStr("")
 
     # --- endpoints (overridable for testing / future API moves) ----------------------
     twitch_api_base: str = "https://api.twitch.tv/helix"
@@ -52,6 +55,9 @@ class Settings(BaseSettings):
     nimo_public_base: str = "https://www.nimo.tv"
     rumble_public_base: str = "https://rumble.com"
     brave_search_url: str = "https://api.search.brave.com/res/v1/web/search"
+    streamscharts_api_base: str = "https://streamscharts.com/api/v2"
+    # time window sent with Streams Charts channel lookups ("" = the API default, 30 days)
+    streamscharts_time: str = ""
 
     # --- optional discovery / enrichment ---------------------------------------------
     kick_public_profile_enrichment: bool = False
@@ -72,6 +78,7 @@ class Settings(BaseSettings):
     nimo_requests_per_minute: int = 30
     rumble_requests_per_minute: int = 30
     search_requests_per_minute: int = 30
+    streamscharts_requests_per_minute: int = 60
     # max requests sent back-to-back before the steady per-minute pace applies (1 = strictly even gaps)
     request_burst: int = 2
     retry_count: int = 4

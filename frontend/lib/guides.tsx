@@ -205,4 +205,23 @@ export const GUIDES: Record<string, Guide> = {
     ],
     note: "Optional. Used only to discover candidate accounts when the platform APIs find nothing plausible.",
   },
+  streamscharts: {
+    fieldLabels: { client_id: "Client ID", token: "Token" },
+    consoleUrl: "https://streamscharts.com/api",
+    consoleName: "Streams Charts API",
+    steps: [
+      <>
+        Open the <A href="https://streamscharts.com/api">Streams Charts API</A> page and click{" "}
+        <b>Get your API key</b>. The API is paid: each channel it finds costs 1 credit, and a name it doesn&apos;t
+        know costs nothing.
+      </>,
+      <>
+        Copy the <b>Client ID</b> and the <b>Token</b> from your API account.
+      </>,
+      <>
+        <b>Save &amp; test</b> uses Streams Charts&apos; free testing mode, so checking the key costs nothing.
+      </>,
+    ],
+    note: "Optional. Finds Twitch and Kick channels that were renamed: Streams Charts still knows them by their old name. It is only asked when a row would otherwise get no match.",
+  },
 };

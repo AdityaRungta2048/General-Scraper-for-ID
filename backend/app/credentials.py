@@ -15,12 +15,15 @@ from typing import Any
 from app.config import Settings
 from app.platforms.catalog import PLATFORMS
 
-# credential id -> required fields ("brave" = optional search-engine fallback).
+# credential id -> required fields ("brave" = optional search-engine fallback,
+# "streamscharts" = optional lookup of renamed channels).
 # Platforms without an official API have no fields: they are simply switched on (KEYLESS).
 FIELDS: dict[str, tuple[str, ...]] = {
     **{p: info.credential_fields for p, info in PLATFORMS.items()},
     "brave": ("api_key",),
+    "streamscharts": ("client_id", "token"),
 }
+OPTIONAL = {"brave", "streamscharts"}
 KEYLESS = {p for p, info in PLATFORMS.items() if info.keyless}
 _ENV_ATTR = {("brave", "api_key"): "brave_search_api_key"}
 

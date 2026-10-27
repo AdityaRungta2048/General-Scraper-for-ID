@@ -11,7 +11,16 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app import credentials
-from app.api.schemas import CredentialsIn, JobOut, ReviewSubmit, RowDetail, RowOut, RowPage, StartRequest
+from app.api.schemas import (
+    CredentialsIn,
+    JobOut,
+    RenamesIn,
+    ReviewSubmit,
+    RowDetail,
+    RowOut,
+    RowPage,
+    StartRequest,
+)
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.excel.exporter import output_filename
@@ -33,6 +42,7 @@ from app.services.jobs import (
     recompute_counters,
     start_job,
 )
+from app.services.renames import RenameError, rename_items, set_renamed_to
 from app.version import MATCHING_ENGINE_VERSION
 from app.workers.processor import is_stale
 from app.workers.queue import enqueue_job
@@ -83,12 +93,15 @@ def config(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     }
 
 
+OPTIONAL_LABELS = {"brave": "Brave Search", "streamscharts": "Streams Charts"}
+
+
 def _credential_status(settings: Settings, cred: str) -> dict[str, Any]:
     return {
         "id": cred,
-        "label": "Brave Search" if cred == "brave" else label(cred),
+        "label": OPTIONAL_LABELS.get(cred) or label(cred),
         "fields": list(credentials.FIELDS[cred]),
-        "optional": cred == "brave",
+        "optional": cred in credentials.OPTIONAL,
         "keyless": cred in credentials.KEYLESS,  # no official API: switched on, no key
         "configured": credentials.is_configured(settings, cred),
         "source": credentials.source(settings, cred),  # "setup" | "environment" | None
@@ -314,6 +327,25 @@ def review_report(
     if not job.review_path or not Path(job.review_path).exists():
         raise HTTPException(404, "review report not available")
     return FileResponse(job.review_path, media_type=XLSX_MEDIA, filename=review_filename(job.filename))
+
+
+@router.get("/jobs/{job_id}/renames")
+def list_renames(job_id: str, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    """Rows with no result, to look up by hand (free) on streamscharts.com."""
+    return rename_items(db, _job_or_404(db, job_id))
+
+
+@router.post("/jobs/{job_id}/renames", response_model=JobOut)
+def post_renames(
+    job_id: str, body: RenamesIn, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)
+) -> JobOut:
+    """Save the current names the user found; those rows are re-checked (official API only)."""
+    job = _job_or_404(db, job_id)
+    try:
+        set_renamed_to(db, settings, job, [(e.original_row, e.renamed_to) for e in body.items])
+    except RenameError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _job_out(job)
 
 
 @router.get("/jobs/{job_id}/reviews")
